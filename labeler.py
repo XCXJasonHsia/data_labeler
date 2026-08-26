@@ -192,6 +192,9 @@ PAGE = r'''<!doctype html>
       marks = savedMarksFor(ep.value).map(x=>({...x}));
       render();
       setPlaybackRate();
+      v.pause();
+      v.removeAttribute('src');
+      v.load();
       v.src = '/video?task='+encodeURIComponent(task)+'&metric='+encodeURIComponent(metric)+'&episode=' + encodeURIComponent(ep.value);
       v.load();
       setPlaybackRate();
@@ -498,8 +501,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_json(self, obj, status=200):
         body = json.dumps(obj, ensure_ascii=False).encode()
-        self.send_response(status); self.send_header('Content-Type', 'application/json')
-        self.end_headers(); self.wfile.write(body)
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_POST(self) -> None:
         if self.path == '/screenshot':

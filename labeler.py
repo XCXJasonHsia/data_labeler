@@ -111,7 +111,7 @@ PAGE = r'''<!doctype html>
   <main>
     <h1>press_by_number / ST 特殊区间取点</h1>
     <p>选择 episode 的头视角，点击播放后使用
-      <span id="key-help"></span>。按键记录当前视频帧。</p>
+      <span id="key-help"></span>。按键记录当前视频帧；SIA 下按 <span class="key">c</span> 撤销最近一次标注。</p>
     <label>task <select id="task" onchange="changeConfig()"></select></label><label>metric <select id="metric" onchange="changeConfig()"></select></label>
     <select id="ep" onchange="loadVideo()"></select>
     <button onclick="loadVideo()">加载头视角</button>
@@ -155,9 +155,22 @@ PAGE = r'''<!doctype html>
       persistLocal();
       document.getElementById('status').textContent = 'Marked ' + key.toUpperCase() + ' at frame ' + frame();
     }
+    function undoLastSiaMark() {
+      if (metric !== 'SIA') return false;
+      if (!marks.length) {
+        document.getElementById('status').textContent = '当前没有可撤销的 SIA 标注';
+        return true;
+      }
+      const removed = marks.pop();
+      render();
+      persistLocal();
+      document.getElementById('status').textContent = '已撤销第 ' + removed.frame + ' 帧的 SIA 标注';
+      return true;
+    }
     document.addEventListener('keydown', e => {
       const key = (e.key || '').toLowerCase();
       if ((key === 'j' || key === 'k') && e.target.tagName !== 'SELECT') { e.preventDefault(); const n=ep.selectedIndex+(key==='k'?1:-1); ep.selectedIndex=(n+episodes.length)%episodes.length; loadVideo(); return; }
+      if (key === 'c' && e.target.tagName !== 'SELECT' && !e.ctrlKey && !e.altKey && !e.metaKey && undoLastSiaMark()) { e.preventDefault(); return; }
       if (!ALLOWED_KEYS.includes(key) || e.target.tagName === 'SELECT' || e.ctrlKey || e.altKey || e.metaKey) return;
       e.preventDefault();
       addMark(key);

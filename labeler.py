@@ -19,6 +19,7 @@ import tempfile
 import subprocess
 import os
 import threading
+import glob
 try:
     import yaml
 except ImportError:
@@ -46,7 +47,7 @@ TASKS = {
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/organize_table/exceptional_intervals.json',
                        'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
-    'store_laptop_and_headphones': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/store_laptop_and_headphones',
+    'store_laptop_and_headphones': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/store_laptop_and_headphone',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/store_laptop_and_headphones/exceptional_intervals.json',
                        'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
@@ -58,7 +59,7 @@ TASKS = {
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/fold_clothes/exceptional_intervals.json',
                        'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
-    'hang_mugs': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/hang_mugs',
+    'hang_mugs': {'video_root': '/mnt/public2/liushengbang/data/RoboDojo_Dataset_to_VMB/hang_mugs',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/hang_mugs/exceptional_intervals.json',
                        'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
@@ -245,8 +246,16 @@ def remote(command: str, data: bytes | None = None) -> bytes:
     return result.stdout
 
 
+def local_task_root(task: str) -> str | None:
+    root = task_config(task, 'SIA')['video_root']
+    return root if os.path.isdir(root) else None
+
+
 def episodes(task=None) -> list[str]:
     task = task or CURRENT_TASK
+    root = local_task_root(task)
+    if root:
+        return sorted(glob.glob(os.path.join(root, '**', 'observation.images.cam_high', '*.mp4'), recursive=True))
     output = remote(
         f"find {shlex.quote(task_config(task, 'SIA')['video_root'])} -type f -path '*/observation.images.cam_high/*.mp4' | sort"
     )
@@ -319,24 +328,26 @@ class Handler(BaseHTTPRequestHandler):
                 all_data = read_local(request_task, request_metric); body, content_type = json.dumps(all_data).encode(), 'application/json'
             elif parsed.path == '/video':
                 path = query.get('episode', [''])[0]
-                if not (path.startswith(task_config(request_task, request_metric)['video_root'] + '/') and
+                root = task_config(request_task, request_metric)['video_root']
+                if not (path.startswith(root + '/') and
                         '/observation.images.cam_high/' in path and path.endswith('.mp4')):
                     raise ValueError('invalid video path')
-                # Download to a temporary local file, then serve it.  This avoids
-                # keeping a complete video in Python memory.
-                with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp:
-                    tmp_path = tmp.name
-                try:
-                    with open(tmp_path, 'wb') as out:
-                        subprocess.run(SSH + [f"cat -- {shlex.quote(path)}"], stdout=out, check=True)
-                    with open(tmp_path, 'rb') as source:
+                if local_task_root(request_task) and os.path.isfile(path):
+                    with open(path, 'rb') as source:
                         body = source.read()
-                finally:
+                else:
+                    with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp:
+                        tmp_path = tmp.name
                     try:
-                        import os
-                        os.unlink(tmp_path)
-                    except OSError:
-                        pass
+                        with open(tmp_path, 'wb') as out:
+                            subprocess.run(SSH + [f"cat -- {shlex.quote(path)}"], stdout=out, check=True)
+                        with open(tmp_path, 'rb') as source:
+                            body = source.read()
+                    finally:
+                        try:
+                            os.unlink(tmp_path)
+                        except OSError:
+                            pass
                 content_type = 'video/mp4'
             else:
                 self.send_error(404)
@@ -363,7 +374,8 @@ class Handler(BaseHTTPRequestHandler):
                 frame = int(obj.get('frame'))
                 if frame < 0:
                     raise ValueError('invalid frame')
-                root = task_config(CURRENT_TASK)['video_root']
+                selected_task = obj.get('task', CURRENT_TASK)
+                root = task_config(selected_task)['video_root']
                 if not (episode.startswith(root + '/') and episode.endswith('.mp4') and
                         '/observation.images.cam_high/' in episode):
                     raise ValueError('invalid episode path')
@@ -374,7 +386,15 @@ class Handler(BaseHTTPRequestHandler):
                 command = (f"ffmpeg -hide_banner -loglevel error -ss {timestamp:.6f} "
                            f"-i {shlex.quote(episode)} -frames:v 1 -f image2pipe "
                            "-vcodec mjpeg -")
-                raw = remote(command)
+                if local_task_root(selected_task) and os.path.isfile(episode):
+                    result = subprocess.run(
+                        ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-ss', f'{timestamp:.6f}',
+                         '-i', episode, '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'mjpeg', '-'],
+                        stdout=subprocess.PIPE, check=True,
+                    )
+                    raw = result.stdout
+                else:
+                    raw = remote(command)
                 if not raw:
                     raise ValueError('ffmpeg did not return an image')
                 directory = os.path.join(LOCAL_SCREENSHOTS, episode_name)
@@ -398,8 +418,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not data: raise ValueError('No locally processed episodes to transfer')
                 output = [{'episode': k, 'frames': make_frames(v)} for k, v in data.items()]
                 payload = json.dumps(output, ensure_ascii=False, indent=2).encode()
-                dest = shlex.quote(directory.rstrip('/') + '/exceptional_intervals.json')
-                remote(f"mkdir -p {shlex.quote(directory)} && cat > {dest}", payload)
+                destination = directory.rstrip('/') + '/exceptional_intervals.json'
+                if os.path.isdir(os.path.dirname(directory)) or os.path.isdir(directory):
+                    os.makedirs(directory, exist_ok=True)
+                    with open(destination, 'wb') as output_file:
+                        output_file.write(payload)
+                else:
+                    dest = shlex.quote(destination)
+                    remote(f"mkdir -p {shlex.quote(directory)} && cat > {dest}", payload)
                 self.send_json({'ok': True, 'message': f'Transferred {len(output)} episodes to {directory}'})
             except Exception as exc: self.send_json({'ok': False, 'error': str(exc)}, 400)
             return

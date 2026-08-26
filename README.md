@@ -4,7 +4,7 @@
 
 ## 功能
 
-- 支持 `organize_table` 和 `store_laptop_and_headphones` task。
+- 支持 `organize_table`、`store_laptop_and_headphones`、`arrange_largest_number`、`fold_clothes`、`hang_mugs` 和 `make_toast` task。
 - 支持 `SIA` 和 `VOC-MEM` metric。
 - SIA 使用 `s` 标记；VOC-MEM 使用 `b`、`s`、`e` 标记。
 - 使用 `j` 切换上一个视频，`k` 切换下一个视频。

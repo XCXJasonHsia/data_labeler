@@ -50,6 +50,22 @@ TASKS = {
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/store_laptop_and_headphones/exceptional_intervals.json',
                        'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+    'arrange_largest_number': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/arrange_largest_number',
+                       'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/arrange_largest_number/exceptional_intervals.json',
+                       'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
+                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+    'fold_clothes': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/fold_clothes',
+                       'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/fold_clothes/exceptional_intervals.json',
+                       'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
+                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+    'hang_mugs': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/hang_mugs',
+                       'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/hang_mugs/exceptional_intervals.json',
+                       'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
+                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+    'make_toast': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/make_toast',
+                       'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/make_toast/exceptional_intervals.json',
+                       'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
+                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
 }
 
 def load_tasks():

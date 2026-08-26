@@ -120,7 +120,7 @@ PAGE = r'''<!doctype html>
     <button onclick="clearMarks()">清空本集</button>
     <button onclick="transfer()">Transfer all</button>
     <video id="v" controls tabindex="0"></video>
-    <label>播放速度：<select id="speed" onchange="v.playbackRate=Number(this.value)"><option value="0.25">0.25x</option><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option><option value="4">4x</option></select></label>
+    <label>播放速度：<select id="speed" onchange="setPlaybackRate()"><option value="0.25">0.25x</option><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option><option value="4">4x</option></select></label>
     <div id="timeline" title="点击跳转"><div id="progress"></div></div>
     <div id="status"></div>
     <table><thead><tr><th>类型</th><th>帧号</th><th>时间</th></tr></thead>
@@ -130,6 +130,13 @@ PAGE = r'''<!doctype html>
     const TASKS = __TASKS__;
     const ALLOWED_KEYS = ['b', 's', 'e'];
     let task = Object.keys(TASKS)[0], metric = 'SIA', episodes = [], marks = [], saved = {}, v = document.getElementById('v');
+    const speedEl = document.getElementById('speed');
+    function setPlaybackRate() {
+      const rate = Number(speedEl.value) || 1;
+      v.defaultPlaybackRate = rate;
+      v.playbackRate = rate;
+    }
+    v.addEventListener('loadedmetadata', setPlaybackRate);
     let ep = document.getElementById('ep');
     const manualLoadButton = document.querySelector('button[onclick="loadVideo()"]');
     if (manualLoadButton) manualLoadButton.remove();
@@ -146,8 +153,15 @@ PAGE = r'''<!doctype html>
       ep.innerHTML = xs.map(x => `<option value="${x}">${saved[x] ? '✓ ' : '○ '}${x.replace(/^.*press_by_number\//, '')}</option>`).join('');
       loadVideo();
     }); */
-    function loadVideo() { marks = (saved[ep.value] || []).map(x=>({...x})); render();
-      v.src = '/video?task='+encodeURIComponent(task)+'&metric='+encodeURIComponent(metric)+'&episode=' + encodeURIComponent(ep.value); v.load(); v.focus(); }
+    function loadVideo() {
+      marks = (saved[ep.value] || []).map(x=>({...x}));
+      render();
+      setPlaybackRate();
+      v.src = '/video?task='+encodeURIComponent(task)+'&metric='+encodeURIComponent(metric)+'&episode=' + encodeURIComponent(ep.value);
+      v.load();
+      setPlaybackRate();
+      v.focus();
+    }
     function frame() { return Math.max(0, Math.round(v.currentTime * 25)); }
     function addMark(key) {
       key = String(key).toLowerCase();

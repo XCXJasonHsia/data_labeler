@@ -68,6 +68,18 @@ TASKS = {
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/make_toast/exceptional_intervals.json',
                        'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+    'put_bottles_into_dustbin': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/put_bottles_into_dustbin',
+                       'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/put_bottles_into_dustbin/exceptional_intervals.json',
+                       'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
+                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+    'stack_blocks': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/stack_blocks',
+                       'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/stack_blocks/exceptional_intervals.json',
+                       'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
+                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+    'sweep_block': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/sweep_block',
+                       'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/sweep_block/exceptional_intervals.json',
+                       'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
+                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
 }
 
 def load_tasks():
@@ -89,7 +101,7 @@ PAGE = r'''<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <title>press_by_number 取点</title>
+  <title>仿真数据标注</title>
   <style>
     body { font: 16px system-ui; margin: 24px; background: #f5f6f8; }
     main { max-width: 1100px; margin: auto; background: white; padding: 20px;
@@ -110,7 +122,7 @@ PAGE = r'''<!doctype html>
 </head>
 <body>
   <main>
-    <h1>press_by_number / ST 特殊区间取点</h1>
+    <h1>仿真数据标注</h1>
     <p>选择 episode 的头视角，点击播放后使用
       <span id="key-help"></span>。按键记录当前视频帧；SIA 下按 <span class="key">c</span> 撤销最近一次标注。</p>
     <label>task <select id="task" onchange="changeConfig()"></select></label><label>metric <select id="metric" onchange="changeConfig()"></select></label>
@@ -381,7 +393,64 @@ def make_frames(record):
                              if not any(b <= i <= e for b, e in intervals)})
 
 
+def parse_byte_range(value: str | None, file_size: int) -> tuple[int, int] | None:
+    if not value:
+        return None
+    if not value.startswith('bytes=') or ',' in value:
+        raise ValueError('unsupported range')
+    bounds = value[6:].split('-', 1)
+    if len(bounds) != 2 or not any(bounds):
+        raise ValueError('invalid range')
+    if not bounds[0]:
+        length = int(bounds[1])
+        if length <= 0:
+            raise ValueError('invalid suffix range')
+        start = max(0, file_size - length)
+        return start, file_size - 1
+    start = int(bounds[0])
+    end = int(bounds[1]) if bounds[1] else file_size - 1
+    if start < 0 or start >= file_size or end < start:
+        raise ValueError('range outside file')
+    return start, min(end, file_size - 1)
+
+
 class Handler(BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
+
+    def serve_video(self, path: str) -> None:
+        file_size = os.path.getsize(path)
+        try:
+            requested_range = parse_byte_range(self.headers.get('Range'), file_size)
+        except (TypeError, ValueError):
+            self.send_response(416)
+            self.send_header('Content-Range', f'bytes */{file_size}')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+
+        start, end = requested_range or (0, file_size - 1)
+        content_length = end - start + 1
+        self.send_response(206 if requested_range else 200)
+        self.send_header('Content-Type', 'video/mp4')
+        self.send_header('Accept-Ranges', 'bytes')
+        self.send_header('Content-Length', str(content_length))
+        if requested_range:
+            self.send_header('Content-Range', f'bytes {start}-{end}/{file_size}')
+        self.end_headers()
+
+        with open(path, 'rb') as source:
+            source.seek(start)
+            remaining = content_length
+            while remaining:
+                chunk = source.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                try:
+                    self.wfile.write(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    break
+                remaining -= len(chunk)
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
@@ -401,22 +470,21 @@ class Handler(BaseHTTPRequestHandler):
                         '/observation.images.cam_high/' in path and path.endswith('.mp4')):
                     raise ValueError('invalid video path')
                 if local_task_root(request_task) and os.path.isfile(path):
-                    with open(path, 'rb') as source:
-                        body = source.read()
+                    self.serve_video(path)
+                    return
                 else:
                     with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp:
                         tmp_path = tmp.name
                     try:
                         with open(tmp_path, 'wb') as out:
                             subprocess.run(SSH + [f"cat -- {shlex.quote(path)}"], stdout=out, check=True)
-                        with open(tmp_path, 'rb') as source:
-                            body = source.read()
+                        self.serve_video(tmp_path)
                     finally:
                         try:
                             os.unlink(tmp_path)
                         except OSError:
                             pass
-                content_type = 'video/mp4'
+                    return
             else:
                 self.send_error(404)
                 return

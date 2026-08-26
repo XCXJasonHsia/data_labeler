@@ -58,3 +58,33 @@ make_toast:
     VOC-MEM:
       markers: [b, s, e]
       kind: interval
+put_bottles_into_dustbin:
+  video_root: /mnt/public2/liushengbang/data/Veified_Data/put_bottles_into_dustbin
+  annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/put_bottles_into_dustbin/exceptional_intervals.json
+  metrics:
+    SIA:
+      markers: [s]
+      kind: nodes
+    VOC-MEM:
+      markers: [b, s, e]
+      kind: interval
+stack_blocks:
+  video_root: /mnt/public2/liushengbang/data/Veified_Data/stack_blocks
+  annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/stack_blocks/exceptional_intervals.json
+  metrics:
+    SIA:
+      markers: [s]
+      kind: nodes
+    VOC-MEM:
+      markers: [b, s, e]
+      kind: interval
+sweep_block:
+  video_root: /mnt/public2/liushengbang/data/Veified_Data/sweep_block
+  annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/sweep_block/exceptional_intervals.json
+  metrics:
+    SIA:
+      markers: [s]
+      kind: nodes
+    VOC-MEM:
+      markers: [b, s, e]
+      kind: interval

@@ -1,0 +1,20 @@
+organize_table:
+  video_root: /mnt/public2/liushengbang/data/Veified_Data/organize_table
+  annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/organize_table/exceptional_intervals.json
+  metrics:
+    SIA:
+      markers: [s]
+      kind: nodes
+    VOC-MEM:
+      markers: [b, s, e]
+      kind: interval
+store_laptop_and_headphones:
+  video_root: /mnt/public2/liushengbang/data/Veified_Data/store_laptop_and_headphones
+  annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/store_laptop_and_headphones/exceptional_intervals.json
+  metrics:
+    SIA:
+      markers: [s]
+      kind: nodes
+    VOC-MEM:
+      markers: [b, s, e]
+      kind: interval

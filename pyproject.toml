@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voc-mem-labeling"
+version = "0.1.0"
+description = "Local web interface for VOC-MEM and SIA video annotation"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[tool.setuptools]
+py-modules = ["labeler"]

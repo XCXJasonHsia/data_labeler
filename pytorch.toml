@@ -1,0 +1,7 @@
+# This project does not use PyTorch directly.
+# Runtime configuration is stored in tasks.yaml.
+# This file is kept as a project configuration marker.
+
+[project]
+name = "voc-mem-labeling"
+python = ">=3.10"

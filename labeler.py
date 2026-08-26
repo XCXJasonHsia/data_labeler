@@ -128,8 +128,9 @@ PAGE = r'''<!doctype html>
   </main>
   <script>
     const TASKS = __TASKS__;
+    const DEFAULT_TASK = __DEFAULT_TASK__;
     const ALLOWED_KEYS = ['b', 's', 'e'];
-    let task = Object.keys(TASKS)[0], metric = 'SIA', episodes = [], marks = [], saved = {}, v = document.getElementById('v');
+    let task = DEFAULT_TASK, metric = 'SIA', episodes = [], marks = [], saved = {}, requestVersion = 0, v = document.getElementById('v');
     const speedEl = document.getElementById('speed');
     function setPlaybackRate() {
       const rate = Number(speedEl.value) || 1;
@@ -144,17 +145,39 @@ PAGE = r'''<!doctype html>
     if (legacySaveButton) legacySaveButton.remove();
     const taskEl=document.getElementById('task'), metricEl=document.getElementById('metric');
     taskEl.innerHTML=Object.keys(TASKS).map(x=>`<option value="${x}">${x}</option>`).join('');
+    taskEl.value=task;
     function changeConfig(){ task=taskEl.value; fetchData(); }
-    function fetchData(){ metricEl.innerHTML=Object.keys(TASKS[task].metrics).map(x=>`<option value="${x}">${x}</option>`).join(''); metric=metricEl.value;
-      Promise.all([fetch('/annotations?task='+encodeURIComponent(task)+'&metric='+encodeURIComponent(metric)).then(r=>r.json()),fetch('/episodes?task='+encodeURIComponent(task)).then(r=>r.json())]).then(([a,xs])=>{saved=a;episodes=xs;ep.innerHTML=xs.map(x=>`<option value="${x}">${saved[x]?'✓':'○'} ${x.split('/').slice(-5,-4)[0]}</option>`).join('');loadVideo();}); }
+    function fetchData(){
+      const previousMetric=metricEl.value;
+      const metricNames=Object.keys(TASKS[task].metrics);
+      metricEl.innerHTML=metricNames.map(x=>`<option value="${x}">${x}</option>`).join('');
+      metricEl.value=metricNames.includes(previousMetric) ? previousMetric : metricNames[0];
+      metric=metricEl.value;
+      const requestedTask=task, requestedMetric=metric, currentRequest=++requestVersion;
+      Promise.all([
+        fetch('/annotations?task='+encodeURIComponent(requestedTask)+'&metric='+encodeURIComponent(requestedMetric)).then(r=>r.json()),
+        fetch('/episodes?task='+encodeURIComponent(requestedTask)).then(r=>r.json()),
+      ]).then(([a,xs])=>{
+        if (currentRequest !== requestVersion || task !== requestedTask || metric !== requestedMetric) return;
+        saved=a; episodes=xs;
+        ep.innerHTML=xs.map(x=>`<option value="${x}">${saved[x]?'✓':'○'} ${x.split('/').slice(-5,-4)[0]}</option>`).join('');
+        if (xs.length) loadVideo();
+        else { marks=[]; v.removeAttribute('src'); v.load(); render(); document.getElementById('status').textContent='当前任务没有可标注视频'; }
+      }).catch(error=>document.getElementById('status').textContent='加载失败：'+error.message);
+    }
     fetchData();
     /* legacy initialization disabled */
     /* fetch('/annotations').then(r=>r.json()).then(a=>{saved=a; return fetch('/episodes');}).then(r => r.json()).then(xs => {
       ep.innerHTML = xs.map(x => `<option value="${x}">${saved[x] ? '✓ ' : '○ '}${x.replace(/^.*press_by_number\//, '')}</option>`).join('');
       loadVideo();
     }); */
+    function savedMarksFor(episode) {
+      const record=saved[episode];
+      if (Array.isArray(record)) return record;
+      return Array.isArray(record?.marks) ? record.marks : [];
+    }
     function loadVideo() {
-      marks = (saved[ep.value] || []).map(x=>({...x}));
+      marks = savedMarksFor(ep.value).map(x=>({...x}));
       render();
       setPlaybackRate();
       v.src = '/video?task='+encodeURIComponent(task)+'&metric='+encodeURIComponent(metric)+'&episode=' + encodeURIComponent(ep.value);
@@ -219,7 +242,7 @@ PAGE = r'''<!doctype html>
     function clearMarks() { marks = []; render(); }
     function persistLocal() { fetch('/save', {method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({episode:ep.value, marks, duration:v.duration, task, metric})}).then(r => r.json()).then(x =>
-      { if(x.ok){saved[ep.value]=marks; ep.options[ep.selectedIndex].textContent='✓ '+ep.options[ep.selectedIndex].textContent.replace(/^[✓○] /,''); render();} document.getElementById('status').textContent = x.message || x.error; }); }
+      { if(x.ok){saved[ep.value]={marks:marks.map(mark=>({...mark}))}; ep.options[ep.selectedIndex].textContent='✓ '+ep.options[ep.selectedIndex].textContent.replace(/^[✓○] /,''); render();} document.getElementById('status').textContent = x.message || x.error; }); }
     async function save() {
       const saveImages = confirm('是否同时在本地保存各标注时间点的视频截图？');
       if (saveImages) {
@@ -508,7 +531,7 @@ def main() -> None:
     global CURRENT_TASK, REMOTE_VIDEO, REMOTE_ANNOT, LOCAL_ANNOT, LOCAL_SCREENSHOTS, PAGE
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=8765)
-    parser.add_argument('--task', default='organize_table',
+    parser.add_argument('--task', choices=sorted(TASKS), default='organize_table',
                         help='任务名；Verified_Data 下的新任务默认只使用 s 键')
     args = parser.parse_args()
     CURRENT_TASK = args.task
@@ -518,6 +541,7 @@ def main() -> None:
     LOCAL_ANNOT = annotation_path(CURRENT_TASK, 'SIA')
     LOCAL_SCREENSHOTS = os.path.join(os.path.dirname(__file__), f'{CURRENT_TASK}_screenshots')
     PAGE = PAGE.replace('__TASKS__', json.dumps(TASKS))
+    PAGE = PAGE.replace('__DEFAULT_TASK__', json.dumps(CURRENT_TASK))
     PAGE = PAGE.replace(
         "const TASKS = __TASKS__;",
         f"const TASKS = {json.dumps(TASKS)}; const ALLOWED_KEYS = ['b','s','e'];",

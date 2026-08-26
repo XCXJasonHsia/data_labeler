@@ -207,7 +207,7 @@ PAGE = r'''<!doctype html>
     }
     document.addEventListener('keydown', e => {
       const key = (e.key || '').toLowerCase();
-      if ((key === 'j' || key === 'k') && e.target.tagName !== 'SELECT') { e.preventDefault(); const n=ep.selectedIndex+(key==='k'?1:-1); ep.selectedIndex=(n+episodes.length)%episodes.length; loadVideo(); return; }
+      if ((key === 'j' || key === 'k' || key === 'd') && e.target.tagName !== 'SELECT') { e.preventDefault(); const n=ep.selectedIndex+(key==='j'?-1:1); ep.selectedIndex=(n+episodes.length)%episodes.length; loadVideo(); return; }
       if (key === 'c' && e.target.tagName !== 'SELECT' && !e.ctrlKey && !e.altKey && !e.metaKey && undoLastSiaMark()) { e.preventDefault(); return; }
       if (!ALLOWED_KEYS.includes(key) || e.target.tagName === 'SELECT' || e.ctrlKey || e.altKey || e.metaKey) return;
       e.preventDefault();

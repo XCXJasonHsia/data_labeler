@@ -8,7 +8,7 @@
 - 支持 `SIA` 和 `VOC-MEM` metric。
 - 两种 metric 都只读取各任务下的 `ST-1`、`ST-HQ-EMB` 和 `ST-HQ-ENV`（即 ST 环境数据），忽略 `ST-2` 和所有 `FRT-*` 数据。
 - SIA 使用 `s` 标记，使用 `c` 撤销最近一次标注；VOC-MEM 使用 `b`、`s`、`e` 标记。
-- 使用 `j` 切换上一个视频，`k` 切换下一个视频。
+- 使用 `j` 切换上一个视频，`k` 或 `d` 切换下一个视频。
 - 切换视频时保留当前播放速度。
 - 已保存的标注会重新加载并显示在时间轴上。
 - 标注按 task 和 metric 分别保存，例如 `organize_table_sia_annotations.json`。

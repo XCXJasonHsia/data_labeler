@@ -6,6 +6,7 @@
 
 - 支持 `organize_table`、`store_laptop_and_headphones`、`arrange_largest_number`、`fold_clothes`、`hang_mugs` 和 `make_toast` task。
 - 支持 `SIA` 和 `VOC-MEM` metric。
+- 两种 metric 都只读取各任务下的 `ST-1`、`ST-HQ-EMB` 和 `ST-HQ-ENV`（即 ST 环境数据），忽略 `ST-2` 和所有 `FRT-*` 数据。
 - SIA 使用 `s` 标记，使用 `c` 撤销最近一次标注；VOC-MEM 使用 `b`、`s`、`e` 标记。
 - 使用 `j` 切换上一个视频，`k` 切换下一个视频。
 - 已保存的标注会重新加载并显示在时间轴上。

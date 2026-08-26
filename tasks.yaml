@@ -39,7 +39,7 @@ fold_clothes:
       markers: [b, s, e]
       kind: interval
 hang_mugs:
-  video_root: /mnt/public2/liushengbang/data/RoboDojo_Dataset_to_VMB/hang_mugs
+  video_root: /mnt/public2/liushengbang/data/Veified_Data/hang_mugs
   annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/hang_mugs/exceptional_intervals.json
   metrics:
     SIA:

@@ -41,6 +41,7 @@ LOCAL_SCREENSHOTS = os.path.join(os.path.dirname(__file__), "press_by_number_scr
 FPS = 25
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "tasks.yaml")
 ANNOTATION_LOCK = threading.Lock()
+ALLOWED_VIDEO_GROUPS = ('ST-1', 'ST-HQ-EMB', 'ST-ENV', 'ST-HQ-ENV')
 
 TASKS = {
     'organize_table': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/organize_table',
@@ -59,7 +60,7 @@ TASKS = {
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/fold_clothes/exceptional_intervals.json',
                        'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
-    'hang_mugs': {'video_root': '/mnt/public2/liushengbang/data/RoboDojo_Dataset_to_VMB/hang_mugs',
+    'hang_mugs': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/hang_mugs',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/hang_mugs/exceptional_intervals.json',
                        'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
@@ -264,14 +265,31 @@ def local_task_root(task: str) -> str | None:
     return root if os.path.isdir(root) else None
 
 
+def allowed_video_path(path: str, root: str) -> bool:
+    relative = os.path.relpath(path, root)
+    group = relative.split(os.sep, 1)[0]
+    return not relative.startswith('..' + os.sep) and group in ALLOWED_VIDEO_GROUPS
+
+
 def episodes(task=None) -> list[str]:
     task = task or CURRENT_TASK
     root = local_task_root(task)
     if root:
-        return sorted(glob.glob(os.path.join(root, '**', 'observation.images.cam_high', '*.mp4'), recursive=True))
-    output = remote(
-        f"find {shlex.quote(task_config(task, 'SIA')['video_root'])} -type f -path '*/observation.images.cam_high/*.mp4' | sort"
+        paths = []
+        for group in ALLOWED_VIDEO_GROUPS:
+            paths.extend(glob.glob(
+                os.path.join(root, group, '**', 'observation.images.cam_high', '*.mp4'),
+                recursive=True,
+            ))
+        return sorted(paths)
+    remote_searches = ' '.join(
+        f"if [ -d {root} ]; then find {root} -type f -path '*/observation.images.cam_high/*.mp4'; fi;"
+        for root in (
+            shlex.quote(os.path.join(task_config(task, 'SIA')['video_root'], group))
+            for group in ALLOWED_VIDEO_GROUPS
+        )
     )
+    output = remote(f"{{ {remote_searches} }} | sort")
     return output.decode().splitlines()
 
 def annotation_path(task=CURRENT_TASK, metric='SIA'):
@@ -342,7 +360,7 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == '/video':
                 path = query.get('episode', [''])[0]
                 root = task_config(request_task, request_metric)['video_root']
-                if not (path.startswith(root + '/') and
+                if not (path.startswith(root + '/') and allowed_video_path(path, root) and
                         '/observation.images.cam_high/' in path and path.endswith('.mp4')):
                     raise ValueError('invalid video path')
                 if local_task_root(request_task) and os.path.isfile(path):
@@ -389,7 +407,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('invalid frame')
                 selected_task = obj.get('task', CURRENT_TASK)
                 root = task_config(selected_task)['video_root']
-                if not (episode.startswith(root + '/') and episode.endswith('.mp4') and
+                if not (episode.startswith(root + '/') and allowed_video_path(episode, root) and episode.endswith('.mp4') and
                         '/observation.images.cam_high/' in episode):
                     raise ValueError('invalid episode path')
                 episode_name = os.path.basename(episode.split('/videos/')[0].rstrip('/'))
@@ -451,7 +469,10 @@ class Handler(BaseHTTPRequestHandler):
             parts = obj.get('episode', '').split('/')
             try:
                 selected_task = obj.get('task', CURRENT_TASK)
-                task_root = task_config(selected_task, obj.get('metric', 'SIA'))['video_root'].rstrip('/').split('/')[-1]
+                video_root = task_config(selected_task, obj.get('metric', 'SIA'))['video_root']
+                if not allowed_video_path(obj.get('episode', ''), video_root):
+                    raise ValueError('selected video is outside the allowed ST groups')
+                task_root = video_root.rstrip('/').split('/')[-1]
                 idx = parts.index(task_root)
                 obj.update(task=selected_task, metric=obj.get('metric', 'SIA'), group=parts[idx + 1],
                            episode_name=parts[idx + 2], gap=20)

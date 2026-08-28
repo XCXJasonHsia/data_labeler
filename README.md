@@ -93,6 +93,14 @@ which python
 python labeler.py --port 8765
 ```
 
+启动只读核验模式：
+
+```bash
+python labeler.py --mode verify --port 8765
+```
+
+核验模式不提供任何标注、截图或导出功能。打开页面后输入视频目录的绝对路径，点击“加载视频”，程序会递归列出该目录下所有 `observation.images.cam_high/*.mp4` 头视角视频供播放。核验时可按 `k` 或 `d` 查看下一个视频，按 `j` 查看上一个视频，首尾循环切换。
+
 启动成功后会输出：
 
 ```text
@@ -174,6 +182,16 @@ hang_mugs_voc-mem_annotations.json
 时间以秒记录，帧号按照 25 FPS 计算。本地标注文件和截图目录已加入 `.gitignore`，不会被普通 Git 提交带到代码仓库。
 
 ## 导出结果
+
+点击页面上的“同步全部到 dataset_sim”并确认后，程序会扫描所有 task 和 metric 的本地已保存结果，并合并写入：
+
+```text
+/mnt/public2/liushengbang/vmbmk/dataset_sim/<task>/episodes/<episode>/annotation.json
+```
+
+SIA 结果写入 `subtask_segments`，VOC-MEM 结果写入 `voc_mem`。同步只替换对应 metric 的字段，保留 `annotation.json` 中已有的其他标注字段。程序按照原始视频分组和 `dataset_sim` 的 `success/domain` 元数据匹配对应视频；找不到匹配视频或标注格式不完整的记录会被跳过，并在页面显示数量。
+
+目标文件名是 VMBMK 数据集现有格式使用的 `annotation.json`（单数）。
 
 点击页面上的 `Transfer all`，输入目标目录的绝对路径。程序会转换当前 task/metric 的全部本地记录，并写入：
 

@@ -42,6 +42,14 @@ FPS = 25
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "tasks.yaml")
 ANNOTATION_LOCK = threading.Lock()
 ALLOWED_VIDEO_GROUPS = ('ST-1', 'ST-HQ-EMB', 'ST-ENV', 'ST-HQ-ENV')
+DATASET_SIM_ROOT = '/mnt/public2/liushengbang/vmbmk/dataset_sim'
+DATASET_TASK_ALIASES = {'sweep_block': 'sweep_blocks'}
+DATASET_GROUP_DOMAINS = {
+    'ST-1': 'id',
+    'ST-HQ-EMB': 'emb',
+    'ST-ENV': 'env',
+    'ST-HQ-ENV': 'env',
+}
 
 TASKS = {
     'organize_table': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/organize_table',
@@ -89,6 +97,7 @@ def load_tasks():
             TASKS = yaml.safe_load(f) or TASKS
 load_tasks()
 CURRENT_TASK = 'press_by_number'
+MODE = 'label'
 
 
 def task_config(task: str, metric: str = 'SIA') -> dict:
@@ -123,26 +132,34 @@ PAGE = r'''<!doctype html>
 <body>
   <main>
     <h1>仿真数据标注</h1>
-    <p>选择 episode 的头视角，点击播放后使用
+    <p id="label-help" class="annotation-only">选择 episode 的头视角，点击播放后使用
       <span id="key-help"></span>。按键记录当前视频帧；SIA 下按 <span class="key">c</span> 撤销最近一次标注。</p>
-    <label>task <select id="task" onchange="changeConfig()"></select></label><label>metric <select id="metric" onchange="changeConfig()"></select></label>
+    <div id="verify-controls" hidden>
+      <label>视频目录 <input id="verify-path" type="text" size="70" placeholder="请输入包含头视角视频的绝对路径"></label>
+      <button id="verify-load" onclick="loadVerifyVideos()">加载视频</button>
+      <p>将递归查找该目录下所有 <code>observation.images.cam_high/*.mp4</code> 头视角视频。按 <span class="key">k</span> 或 <span class="key">d</span> 查看下一个，按 <span class="key">j</span> 查看上一个。</p>
+    </div>
+    <div id="label-controls" class="annotation-only">
+      <label>task <select id="task" onchange="changeConfig()"></select></label><label>metric <select id="metric" onchange="changeConfig()"></select></label>
+    </div>
     <select id="ep" onchange="loadVideo()"></select>
-    <button onclick="loadVideo()">加载头视角</button>
-    <button onclick="save()">保存并发送到远程</button>
-    <button onclick="clearMarks()">清空本集</button>
-    <button onclick="transfer()">Transfer all</button>
+    <button class="annotation-only" onclick="save()">保存并发送到远程</button>
+    <button class="annotation-only" onclick="clearMarks()">清空本集</button>
+    <button class="annotation-only" onclick="transfer()">Transfer all</button>
+    <button class="annotation-only" onclick="syncDataset()">同步全部到 dataset_sim</button>
     <video id="v" controls tabindex="0"></video>
     <label>播放速度：<select id="speed" onchange="setPlaybackRate()"><option value="0.25">0.25x</option><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option><option value="4">4x</option></select></label>
-    <div id="timeline" title="点击跳转"><div id="progress"></div></div>
+    <div id="timeline" class="annotation-only" title="点击跳转"><div id="progress"></div></div>
     <div id="status"></div>
-    <table><thead><tr><th>类型</th><th>帧号</th><th>时间</th></tr></thead>
+    <table class="annotation-only"><thead><tr><th>类型</th><th>帧号</th><th>时间</th></tr></thead>
       <tbody id="rows"></tbody></table>
   </main>
   <script>
     const TASKS = __TASKS__;
     const DEFAULT_TASK = __DEFAULT_TASK__;
+    const APP_MODE = __APP_MODE__;
     const ALLOWED_KEYS = ['b', 's', 'e'];
-    let task = DEFAULT_TASK, metric = 'SIA', episodes = [], marks = [], saved = {}, requestVersion = 0, v = document.getElementById('v');
+    let task = DEFAULT_TASK, metric = 'SIA', episodes = [], marks = [], saved = {}, verifyRoot = '', requestVersion = 0, v = document.getElementById('v');
     const speedEl = document.getElementById('speed');
     function setPlaybackRate() {
       const rate = Number(speedEl.value) || 1;
@@ -151,6 +168,13 @@ PAGE = r'''<!doctype html>
     }
     v.addEventListener('loadedmetadata', setPlaybackRate);
     let ep = document.getElementById('ep');
+    if (APP_MODE === 'verify') {
+      document.title = '头视角视频核验';
+      document.querySelector('h1').textContent = '头视角视频核验';
+      document.getElementById('verify-controls').hidden = false;
+      document.querySelectorAll('.annotation-only').forEach(x => x.hidden = true);
+      document.getElementById('ep').disabled = false;
+    }
     const manualLoadButton = document.querySelector('button[onclick="loadVideo()"]');
     if (manualLoadButton) manualLoadButton.remove();
     const legacySaveButton = document.querySelector('button[onclick^="save"]');
@@ -160,6 +184,7 @@ PAGE = r'''<!doctype html>
     taskEl.value=task;
     function changeConfig(){ task=taskEl.value; fetchData(); }
     function fetchData(){
+      if (APP_MODE === 'verify') return loadVerifyVideos();
       const previousMetric=metricEl.value;
       const metricNames=Object.keys(TASKS[task].metrics);
       metricEl.innerHTML=metricNames.map(x=>`<option value="${x}">${x}</option>`).join('');
@@ -195,13 +220,36 @@ PAGE = r'''<!doctype html>
       v.pause();
       v.removeAttribute('src');
       v.load();
-      v.src = '/video?task='+encodeURIComponent(task)+'&metric='+encodeURIComponent(metric)+'&episode=' + encodeURIComponent(ep.value);
+      const rootQuery = APP_MODE === 'verify' ? '&root=' + encodeURIComponent(verifyRoot) : '';
+      v.src = '/video?task='+encodeURIComponent(task)+'&metric='+encodeURIComponent(metric)+'&episode=' + encodeURIComponent(ep.value) + rootQuery;
       v.load();
       setPlaybackRate();
       v.focus();
     }
+    function loadVerifyVideos() {
+      const path = document.getElementById('verify-path').value.trim();
+      if (!path) {
+        document.getElementById('status').textContent = '请输入视频目录的绝对路径';
+        return;
+      }
+      verifyRoot = path;
+      fetch('/episodes?path='+encodeURIComponent(path)).then(r => r.json().then(data => {
+        if (!r.ok) throw new Error(data.error || '加载失败');
+        return data;
+      })).then(xs => {
+        episodes = xs; saved = {}; marks = [];
+        ep.innerHTML = xs.map(x => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('');
+        if (xs.length) loadVideo();
+        else { v.removeAttribute('src'); v.load(); render(); document.getElementById('status').textContent = '该路径下没有头视角视频'; }
+        document.getElementById('status').textContent = `找到 ${xs.length} 个头视角视频`;
+      }).catch(error => document.getElementById('status').textContent = '加载失败：'+error.message);
+    }
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    }
     function frame() { return Math.max(0, Math.round(v.currentTime * 25)); }
     function addMark(key) {
+      if (APP_MODE === 'verify') return;
       key = String(key).toLowerCase();
       marks.push({type: key, frame: frame(), time: Number(v.currentTime.toFixed(3))});
       render();
@@ -222,7 +270,8 @@ PAGE = r'''<!doctype html>
     }
     document.addEventListener('keydown', e => {
       const key = (e.key || '').toLowerCase();
-      if ((key === 'j' || key === 'k' || key === 'd') && e.target.tagName !== 'SELECT') { e.preventDefault(); const n=ep.selectedIndex+(key==='j'?-1:1); ep.selectedIndex=(n+episodes.length)%episodes.length; loadVideo(); return; }
+      if ((key === 'j' || key === 'k' || key === 'd') && e.target.tagName !== 'SELECT' && episodes.length) { e.preventDefault(); const n=ep.selectedIndex+(key==='j'?-1:1); ep.selectedIndex=(n+episodes.length)%episodes.length; loadVideo(); return; }
+      if (APP_MODE === 'verify') return;
       if (key === 'c' && e.target.tagName !== 'SELECT' && !e.ctrlKey && !e.altKey && !e.metaKey && undoLastSiaMark()) { e.preventDefault(); return; }
       if (!ALLOWED_KEYS.includes(key) || e.target.tagName === 'SELECT' || e.ctrlKey || e.altKey || e.metaKey) return;
       e.preventDefault();
@@ -298,6 +347,10 @@ PAGE = r'''<!doctype html>
       fetch('/transfer', {method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify({directory, task, metric})}).then(r=>r.json()).then(x=>
         document.getElementById('status').textContent=x.message||x.error); }
+    function syncDataset() {
+      if (!confirm('将所有已完成的本地标注同步到 dataset_sim 中对应 episode 的 annotation.json，是否继续？')) return;
+      fetch('/sync-dataset', {method:'POST'}).then(r=>r.json()).then(x=>
+        document.getElementById('status').textContent=x.message||x.error); }
   </script>
 </body>
 </html>'''
@@ -343,6 +396,18 @@ def episodes(task=None) -> list[str]:
     )
     output = remote(f"{{ {remote_searches} }} | sort")
     return output.decode().splitlines()
+
+def verify_episodes(root: str) -> list[str]:
+    """Find all head-view videos below a user-supplied local directory."""
+    if not isinstance(root, str) or not root.startswith('/'):
+        raise ValueError('视频目录必须是绝对路径')
+    root = os.path.abspath(root)
+    if not os.path.isdir(root):
+        raise ValueError('视频目录不存在或不是目录')
+    return sorted(glob.glob(
+        os.path.join(root, '**', 'observation.images.cam_high', '*.mp4'),
+        recursive=True,
+    ))
 
 def annotation_path(task=CURRENT_TASK, metric='SIA'):
     return os.path.join(os.path.dirname(__file__), f'{task}_{metric.lower()}_annotations.json')
@@ -394,6 +459,115 @@ def make_frames(record):
     total = max(max(e for _, e in intervals) + 1, round(float(record.get('duration', 0)) * FPS))
     return sorted(special | {i for i in range(0, total, 20)
                              if not any(b <= i <= e for b, e in intervals)})
+
+
+def dataset_task_directory(task: str) -> str:
+    candidates = [
+        DATASET_TASK_ALIASES.get(task, task),
+        os.path.basename(task_config(task)['video_root'].rstrip('/')),
+    ]
+    for name in dict.fromkeys(candidates):
+        path = os.path.join(DATASET_SIM_ROOT, name)
+        if os.path.isdir(path):
+            return path
+    raise ValueError(f'dataset_sim 中不存在 task: {task}')
+
+
+def dataset_episode_map(task: str) -> dict[str, str]:
+    """Map source videos to converted dataset episodes by group order."""
+    task_directory = dataset_task_directory(task)
+    target_groups: dict[str, list[tuple[int, str]]] = {
+        group: [] for group in DATASET_GROUP_DOMAINS
+    }
+    for metadata_file in glob.glob(os.path.join(task_directory, 'episodes', '*', 'metadata.json')):
+        with open(metadata_file, encoding='utf-8') as source:
+            metadata = json.load(source)
+        if metadata.get('success') is not True:
+            continue
+        episode_id = metadata.get('episode_id', '')
+        try:
+            episode_number = int(episode_id.rsplit('_', 1)[1])
+        except (IndexError, ValueError):
+            continue
+        for group, domain in DATASET_GROUP_DOMAINS.items():
+            if metadata.get('domain') == domain:
+                target_groups[group].append((episode_number, os.path.dirname(metadata_file)))
+
+    video_root = task_config(task)['video_root']
+    mapping = {}
+    for group in DATASET_GROUP_DOMAINS:
+        source_videos = sorted(glob.glob(
+            os.path.join(video_root, group, '**', 'observation.images.cam_high', '*.mp4'),
+            recursive=True,
+        ))
+        target_episodes = [path for _, path in sorted(target_groups[group])]
+        for source_video, target_episode in zip(source_videos, target_episodes):
+            target_video = os.path.join(target_episode, 'videos', 'front.mp4')
+            if (os.path.isfile(source_video) and os.path.isfile(target_video) and
+                    os.path.getsize(source_video) != os.path.getsize(target_video)):
+                continue
+            mapping[source_video] = os.path.join(target_episode, 'annotation.json')
+    return mapping
+
+
+def dataset_annotation_value(record: dict) -> tuple[str, list[dict]]:
+    metric = record.get('metric', 'SIA')
+    if metric == 'SIA':
+        frames = sorted({int(mark['frame']) for mark in record.get('marks', [])})
+        return 'subtask_segments', [
+            {'id': f'{index:03d}', 'subtask_frame': frame}
+            for index, frame in enumerate(frames, 1)
+        ]
+    if metric == 'VOC-MEM':
+        return 'voc_mem', [{'frame_index': frame} for frame in make_frames(record)]
+    raise ValueError(f'不支持的 metric: {metric}')
+
+
+def sync_dataset_annotations(dry_run: bool = False) -> tuple[int, list[str]]:
+    """Merge every local label record into its dataset_sim annotation file."""
+    updates: dict[str, dict[str, list[dict]]] = {}
+    skipped = []
+    for task in TASKS:
+        task_records = [
+            record
+            for metric in TASKS[task]['metrics']
+            for record in read_local(task, metric).values()
+        ]
+        if not task_records:
+            continue
+        try:
+            episode_map = dataset_episode_map(task)
+        except (OSError, ValueError) as exc:
+            skipped.extend(f'{task}/{record.get("episode_name", "unknown")}: {exc}'
+                           for record in task_records)
+            continue
+        for record in task_records:
+            try:
+                annotation_file = episode_map.get(record.get('episode', ''))
+                if not annotation_file or not os.path.isfile(annotation_file):
+                    raise ValueError('dataset_sim 中没有匹配的视频')
+                field, value = dataset_annotation_value(record)
+                updates.setdefault(annotation_file, {})[field] = value
+            except (KeyError, TypeError, ValueError) as exc:
+                skipped.append(f'{task}/{record.get("episode_name", "unknown")}: {exc}')
+
+    payloads = {}
+    for annotation_file, fields in updates.items():
+        with open(annotation_file, encoding='utf-8') as source:
+            annotation = json.load(source)
+        annotation.update(fields)
+        payloads[annotation_file] = annotation
+
+    if dry_run:
+        return len(payloads), skipped
+
+    for annotation_file, annotation in payloads.items():
+        temporary = annotation_file + '.tmp'
+        with open(temporary, 'w', encoding='utf-8') as output:
+            json.dump(annotation, output, ensure_ascii=False, indent=2)
+            output.write('\n')
+        os.replace(temporary, annotation_file)
+    return len(updates), skipped
 
 
 def parse_byte_range(value: str | None, file_size: int) -> tuple[int, int] | None:
@@ -463,11 +637,36 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == '/':
                 body, content_type = PAGE.encode(), 'text/html; charset=utf-8'
             elif parsed.path == '/episodes':
-                body, content_type = json.dumps(episodes(request_task)).encode(), 'application/json'
+                if MODE == 'verify':
+                    root = query.get('path', [''])[0]
+                    try:
+                        body = json.dumps(verify_episodes(root)).encode()
+                        content_type = 'application/json'
+                    except ValueError as exc:
+                        self.send_json({'error': str(exc)}, 400)
+                        return
+                else:
+                    body, content_type = json.dumps(episodes(request_task)).encode(), 'application/json'
             elif parsed.path == '/annotations':
+                if MODE == 'verify':
+                    self.send_error(403, 'verify mode is read-only')
+                    return
                 all_data = read_local(request_task, request_metric); body, content_type = json.dumps(all_data).encode(), 'application/json'
             elif parsed.path == '/video':
                 path = query.get('episode', [''])[0]
+                if MODE == 'verify':
+                    normalized = os.path.abspath(path)
+                    verify_root_input = query.get('root', [''])[0]
+                    verify_root = os.path.abspath(verify_root_input)
+                    if (not path.startswith('/') or normalized != path or
+                            not verify_root_input or not os.path.isdir(verify_root) or
+                            os.path.commonpath((normalized, verify_root)) != verify_root or
+                            not os.path.isfile(normalized) or
+                            os.path.basename(os.path.dirname(normalized)) != 'observation.images.cam_high' or
+                            not normalized.endswith('.mp4')):
+                        raise ValueError('invalid verify video path')
+                    self.serve_video(normalized)
+                    return
                 root = task_config(request_task, request_metric)['video_root']
                 if not (path.startswith(root + '/') and allowed_video_path(path, root) and
                         '/observation.images.cam_high/' in path and path.endswith('.mp4')):
@@ -508,6 +707,12 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:
+        if MODE == 'verify':
+            length = int(self.headers.get('Content-Length', 0))
+            if length:
+                self.rfile.read(length)
+            self.send_json({'ok': False, 'error': 'verify 模式不支持标注或导出'}, 403)
+            return
         if self.path == '/screenshot':
             try:
                 length = int(self.headers.get('Content-Length', 0))
@@ -544,6 +749,23 @@ class Handler(BaseHTTPRequestHandler):
                 with open(os.path.join(directory, f'{frame:08d}.jpg'), 'wb') as out:
                     out.write(raw)
                 self.send_json({'ok': True})
+            except Exception as exc:
+                self.send_json({'ok': False, 'error': str(exc)}, 400)
+            return
+        if self.path == '/sync-dataset':
+            try:
+                with ANNOTATION_LOCK:
+                    updated, skipped = sync_dataset_annotations()
+                message = f'已同步 {updated} 个 episode 到 {DATASET_SIM_ROOT}'
+                if skipped:
+                    message += f'；跳过 {len(skipped)} 条未匹配或不完整记录'
+                    message += '：' + '；'.join(skipped[:3])
+                self.send_json({
+                    'ok': True,
+                    'message': message,
+                    'updated': updated,
+                    'skipped': skipped,
+                })
             except Exception as exc:
                 self.send_json({'ok': False, 'error': str(exc)}, 400)
             return
@@ -602,13 +824,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    global CURRENT_TASK, REMOTE_VIDEO, REMOTE_ANNOT, LOCAL_ANNOT, LOCAL_SCREENSHOTS, PAGE
+    global CURRENT_TASK, MODE, REMOTE_VIDEO, REMOTE_ANNOT, LOCAL_ANNOT, LOCAL_SCREENSHOTS, PAGE
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=8765)
+    parser.add_argument('--mode', choices=('label', 'verify'), default='label',
+                        help='label 标注模式；verify 只读核验模式，需要在页面输入视频目录')
     parser.add_argument('--task', choices=sorted(TASKS), default='organize_table',
                         help='任务名；Verified_Data 下的新任务默认只使用 s 键')
     args = parser.parse_args()
     CURRENT_TASK = args.task
+    MODE = args.mode
     config = task_config(CURRENT_TASK)
     REMOTE_VIDEO = config['video_root']
     REMOTE_ANNOT = config['annotation']
@@ -616,6 +841,7 @@ def main() -> None:
     LOCAL_SCREENSHOTS = os.path.join(os.path.dirname(__file__), f'{CURRENT_TASK}_screenshots')
     PAGE = PAGE.replace('__TASKS__', json.dumps(TASKS))
     PAGE = PAGE.replace('__DEFAULT_TASK__', json.dumps(CURRENT_TASK))
+    PAGE = PAGE.replace('__APP_MODE__', json.dumps(MODE))
     PAGE = PAGE.replace(
         "const TASKS = __TASKS__;",
         f"const TASKS = {json.dumps(TASKS)}; const ALLOWED_KEYS = ['b','s','e'];",

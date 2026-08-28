@@ -42,6 +42,11 @@ FPS = 25
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "tasks.yaml")
 ANNOTATION_LOCK = threading.Lock()
 ALLOWED_VIDEO_GROUPS = ('ST-1', 'ST-HQ-EMB', 'ST-ENV', 'ST-HQ-ENV')
+VIDEO_CAMERA_DIRECTORIES = (
+    'observation.images.cam_high',
+    'observation.images.cam_left_wrist',
+    'observation.images.cam_right_wrist',
+)
 DATASET_SIM_ROOT = '/mnt/public2/liushengbang/vmbmk/dataset_sim'
 DATASET_TASK_ALIASES = {'sweep_block': 'sweep_blocks'}
 DATASET_GROUP_DOMAINS = {
@@ -110,67 +115,231 @@ PAGE = r'''<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>仿真数据标注</title>
   <style>
-    body { font: 16px system-ui; margin: 24px; background: #f5f6f8; }
-    main { max-width: 1100px; margin: auto; background: white; padding: 20px;
-           border-radius: 12px; }
-    video { width: 100%; max-height: 650px; background: #111; }
-    select, button { font-size: 16px; padding: 8px; margin: 5px; }
-    #timeline { position: relative; height: 28px; margin: 8px 0 16px; background: #dfe4ea; border-radius: 5px; cursor: pointer; }
-    #progress { height: 100%; width: 0; background: #9bb7d4; border-radius: 5px; pointer-events: none; }
-    .marker { position: absolute; top: -4px; width: 4px; height: 36px; transform: translateX(-2px); cursor: pointer; }
-    .marker b { position: absolute; top: -24px; left: -5px; font-size: 13px; }
-    .marker-b { background: #16803c; }.marker-s { background: #d28b00; }.marker-e { background: #c53030; }
-    .key { display: inline-block; padding: 5px 10px; background: #eee;
-           border-radius: 5px; }
-    #status { margin: 12px 0; color: #174d2b; }
-    table { border-collapse: collapse; }
-    td, th { padding: 5px 12px; border-bottom: 1px solid #ddd; }
+    :root {
+      color-scheme: light;
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --surface: rgba(255, 255, 255, 0.96);
+      --soft: #f8fafc;
+      --video: #0b1220;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      padding: 28px;
+      color: var(--ink);
+      font: 15px/1.6 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 12% 4%, rgba(59, 130, 246, 0.16), transparent 30%),
+        radial-gradient(circle at 92% 12%, rgba(14, 165, 233, 0.12), transparent 28%),
+        #eef3f9;
+    }
+    main {
+      max-width: 1440px;
+      margin: auto;
+      padding: 28px;
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      border-radius: 22px;
+      background: var(--surface);
+      box-shadow: 0 24px 70px rgba(30, 64, 175, 0.12);
+      backdrop-filter: blur(16px);
+    }
+    .page-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
+    .eyebrow { margin: 0 0 2px; color: var(--primary); font-size: 12px; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(26px, 3vw, 38px); line-height: 1.2; letter-spacing: -0.04em; }
+    .sync-badge { flex: none; padding: 8px 13px; border: 1px solid #bfdbfe; border-radius: 999px; color: #1e40af; background: #eff6ff; font-size: 13px; font-weight: 700; }
+    .guide {
+      margin: 0 0 18px;
+      padding: 14px 16px;
+      border: 1px solid #dbeafe;
+      border-left: 4px solid var(--primary);
+      border-radius: 12px;
+      color: #334155;
+      background: linear-gradient(135deg, #eff6ff, #f8fafc);
+    }
+    .key {
+      display: inline-block;
+      min-width: 28px;
+      margin: 0 2px;
+      padding: 1px 7px;
+      border: 1px solid #cbd5e1;
+      border-bottom-width: 2px;
+      border-radius: 6px;
+      color: #1e293b;
+      background: white;
+      font: 700 13px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
+      text-align: center;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+    }
+    #verify-controls, .toolbar {
+      margin-bottom: 18px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--soft);
+    }
+    #verify-controls p { margin: 10px 2px 0; color: var(--muted); }
+    .verify-row { display: flex; align-items: end; gap: 10px; }
+    .verify-field { flex: 1; }
+    .toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; }
+    #label-controls { display: contents; }
+    .field { display: flex; min-width: 150px; flex-direction: column; gap: 5px; color: #475569; font-size: 12px; font-weight: 700; }
+    .episode-field { min-width: 260px; flex: 1 1 360px; }
+    select, input {
+      width: 100%;
+      min-height: 40px;
+      padding: 8px 11px;
+      border: 1px solid #cbd5e1;
+      border-radius: 9px;
+      outline: none;
+      color: var(--ink);
+      background: white;
+      font: inherit;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    select:focus, input:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14); }
+    button {
+      min-height: 40px;
+      padding: 8px 14px;
+      border: 1px solid #cbd5e1;
+      border-radius: 9px;
+      color: #334155;
+      background: white;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+    }
+    button:hover { border-color: #94a3b8; background: #f8fafc; box-shadow: 0 5px 14px rgba(15, 23, 42, 0.08); transform: translateY(-1px); }
+    button:active { transform: translateY(0); }
+    .primary-button { border-color: var(--primary); color: white; background: var(--primary); }
+    .primary-button:hover { border-color: var(--primary-dark); background: var(--primary-dark); }
+    .danger-button { border-color: #fecaca; color: #b91c1c; background: #fff7f7; }
+    .video-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(270px, 1fr); gap: 14px; align-items: stretch; }
+    .video-panel { display: flex; min-width: 0; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid #1e293b; border-radius: 15px; background: var(--video); box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16); }
+    .video-label { display: flex; align-items: center; gap: 7px; color: #dbeafe; font-size: 13px; font-weight: 700; }
+    .video-label::before { width: 7px; height: 7px; border-radius: 50%; background: #38bdf8; box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14); content: ""; }
+    .video-layout video { display: block; width: 100%; min-height: 0; border-radius: 10px; background: #020617; object-fit: contain; }
+    #v { flex: 1; max-height: 650px; }
+    .wrist-stack { display: grid; min-height: 0; grid-template-rows: 1fr 1fr; gap: 14px; }
+    .wrist-stack video { flex: 1; max-height: 310px; }
+    .playback-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin: 14px 0 10px; color: #475569; font-size: 13px; font-weight: 700; }
+    .playback-toolbar select { width: 110px; }
+    #timeline { position: relative; height: 18px; margin: 12px 0 18px; border: 1px solid #cbd5e1; border-radius: 999px; background: #e8eef5; cursor: pointer; box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.06); }
+    #progress { height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, #3b82f6, #06b6d4); pointer-events: none; }
+    .marker { position: absolute; top: -7px; width: 4px; height: 30px; border-radius: 999px; transform: translateX(-2px); cursor: pointer; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25); }
+    .marker b { position: absolute; top: -23px; left: -6px; padding: 0 4px; border-radius: 4px; color: white; font-size: 11px; text-transform: uppercase; }
+    .marker-b, .marker-b b { background: #16a34a; }.marker-s, .marker-s b { background: #d97706; }.marker-e, .marker-e b { background: #dc2626; }
+    #status { margin: 12px 0; padding: 11px 14px; border: 1px solid #bbf7d0; border-radius: 10px; color: #166534; background: #f0fdf4; font-size: 14px; }
+    .table-card { overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: white; }
+    table { width: 100%; border-collapse: collapse; }
+    td, th { padding: 10px 14px; border-bottom: 1px solid var(--line); text-align: left; }
+    th { color: #475569; background: #f8fafc; font-size: 12px; letter-spacing: 0.04em; }
+    tbody tr:last-child td { border-bottom: 0; }
+    tbody tr:hover { background: #f8fbff; }
+    @media (max-width: 850px) {
+      body { padding: 14px; }
+      main { padding: 18px; border-radius: 16px; }
+      .video-layout { grid-template-columns: 1fr; }
+      .wrist-stack { grid-template-columns: 1fr 1fr; grid-template-rows: none; }
+      .sync-badge { display: none; }
+    }
+    @media (max-width: 580px) {
+      .page-header { align-items: flex-start; }
+      .wrist-stack { grid-template-columns: 1fr; }
+      .verify-row { align-items: stretch; flex-direction: column; }
+      #verify-load { width: 100%; }
+      .toolbar, .field, .episode-field { width: 100%; min-width: 0; }
+      .toolbar button { flex: 1 1 calc(50% - 8px); }
+    }
   </style>
 </head>
 <body>
   <main>
-    <h1>仿真数据标注</h1>
-    <p id="label-help" class="annotation-only">选择 episode 的头视角，点击播放后使用
-      <span id="key-help"></span>。按键记录当前视频帧；SIA 下按 <span class="key">c</span> 撤销最近一次标注。</p>
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">Simulation Data Workspace</p>
+        <h1>仿真数据标注</h1>
+      </div>
+      <div class="sync-badge">三视角同步 · 25 FPS</div>
+    </header>
+    <p id="label-help" class="guide annotation-only">选择 episode 后，在主视角点击播放并使用
+      <span id="key-help"></span>。按键记录当前视频帧；SIA 下按 <span class="key">c</span> 撤销最近一次标注。按 <span class="key">a / ←</span> 后退一帧，按 <span class="key">d / →</span> 前进一帧。按 <span class="key">j</span> 切换上一个视频，按 <span class="key">k</span> 切换下一个视频。</p>
     <div id="verify-controls" hidden>
-      <label>视频目录 <input id="verify-path" type="text" size="70" placeholder="请输入包含头视角视频的绝对路径"></label>
-      <button id="verify-load" onclick="loadVerifyVideos()">加载视频</button>
-      <p>将递归查找该目录下所有 <code>observation.images.cam_high/*.mp4</code> 头视角视频。按 <span class="key">k</span> 或 <span class="key">d</span> 查看下一个，按 <span class="key">j</span> 查看上一个。</p>
+      <div class="verify-row">
+        <label class="field verify-field">视频目录 <input id="verify-path" type="text" placeholder="请输入包含三视角视频的绝对路径"></label>
+        <button id="verify-load" class="primary-button" onclick="loadVerifyVideos()">加载视频</button>
+      </div>
+      <p>将根据 <code>observation.images.cam_high/*.mp4</code> 查找 episode，并同时加载主视角、左腕和右腕视频。按 <span class="key">k</span> 查看下一个，按 <span class="key">j</span> 查看上一个；按 <span class="key">a / ←</span> 后退一帧，按 <span class="key">d / →</span> 前进一帧。</p>
     </div>
-    <div id="label-controls" class="annotation-only">
-      <label>task <select id="task" onchange="changeConfig()"></select></label><label>metric <select id="metric" onchange="changeConfig()"></select></label>
+    <section class="toolbar">
+      <div id="label-controls" class="annotation-only">
+        <label class="field">任务<select id="task" onchange="changeConfig()"></select></label>
+        <label class="field">标注类型<select id="metric" onchange="changeConfig()"></select></label>
+      </div>
+      <label class="field episode-field">Episode<select id="ep" onchange="loadVideo()"></select></label>
+      <button class="annotation-only primary-button" onclick="save()">保存并发送到远程</button>
+      <button class="annotation-only danger-button" onclick="clearMarks()">清空本集</button>
+      <button class="annotation-only" onclick="transfer()">Transfer all</button>
+      <button class="annotation-only" onclick="syncDataset()">同步全部到 dataset_sim</button>
+    </section>
+    <div class="video-layout">
+      <div class="video-panel">
+        <div class="video-label">主视角</div>
+        <video id="v" controls playsinline preload="auto" tabindex="0"></video>
+      </div>
+      <div class="wrist-stack">
+        <div class="video-panel">
+          <div class="video-label">左手腕部相机视角</div>
+          <video id="left-wrist-video" muted playsinline preload="auto"></video>
+        </div>
+        <div class="video-panel">
+          <div class="video-label">右手腕部相机视角</div>
+          <video id="right-wrist-video" muted playsinline preload="auto"></video>
+        </div>
+      </div>
     </div>
-    <select id="ep" onchange="loadVideo()"></select>
-    <button class="annotation-only" onclick="save()">保存并发送到远程</button>
-    <button class="annotation-only" onclick="clearMarks()">清空本集</button>
-    <button class="annotation-only" onclick="transfer()">Transfer all</button>
-    <button class="annotation-only" onclick="syncDataset()">同步全部到 dataset_sim</button>
-    <video id="v" controls tabindex="0"></video>
-    <label>播放速度：<select id="speed" onchange="setPlaybackRate()"><option value="0.25">0.25x</option><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option><option value="4">4x</option></select></label>
+    <label class="playback-toolbar">播放速度<select id="speed" onchange="setPlaybackRate()"><option value="0.25">0.25x</option><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option><option value="4">4x</option></select></label>
     <div id="timeline" class="annotation-only" title="点击跳转"><div id="progress"></div></div>
     <div id="status"></div>
-    <table class="annotation-only"><thead><tr><th>类型</th><th>帧号</th><th>时间</th></tr></thead>
-      <tbody id="rows"></tbody></table>
+    <div class="table-card annotation-only">
+      <table><thead><tr><th>类型</th><th>帧号</th><th>时间</th></tr></thead>
+        <tbody id="rows"></tbody></table>
+    </div>
   </main>
   <script>
     const TASKS = __TASKS__;
     const DEFAULT_TASK = __DEFAULT_TASK__;
     const APP_MODE = __APP_MODE__;
     const ALLOWED_KEYS = ['b', 's', 'e'];
+    const VIDEO_FPS = 25;
     let task = DEFAULT_TASK, metric = 'SIA', episodes = [], marks = [], saved = {}, verifyRoot = '', requestVersion = 0, v = document.getElementById('v');
+    const leftWristVideo = document.getElementById('left-wrist-video');
+    const rightWristVideo = document.getElementById('right-wrist-video');
+    const wristVideos = [leftWristVideo, rightWristVideo];
+    const allVideos = [v, ...wristVideos];
     const speedEl = document.getElementById('speed');
     function setPlaybackRate() {
       const rate = Number(speedEl.value) || 1;
-      v.defaultPlaybackRate = rate;
-      v.playbackRate = rate;
+      allVideos.forEach(video => {
+        video.defaultPlaybackRate = rate;
+        video.playbackRate = rate;
+      });
     }
-    v.addEventListener('loadedmetadata', setPlaybackRate);
+    allVideos.forEach(video => video.addEventListener('loadedmetadata', setPlaybackRate));
     let ep = document.getElementById('ep');
     if (APP_MODE === 'verify') {
-      document.title = '头视角视频核验';
-      document.querySelector('h1').textContent = '头视角视频核验';
+      document.title = '多视角视频核验';
+      document.querySelector('h1').textContent = '多视角视频核验';
       document.getElementById('verify-controls').hidden = false;
       document.querySelectorAll('.annotation-only').forEach(x => x.hidden = true);
       document.getElementById('ep').disabled = false;
@@ -199,7 +368,7 @@ PAGE = r'''<!doctype html>
         saved=a; episodes=xs;
         ep.innerHTML=xs.map(x=>`<option value="${x}">${saved[x]?'✓':'○'} ${x.split('/').slice(-5,-4)[0]}</option>`).join('');
         if (xs.length) loadVideo();
-        else { marks=[]; v.removeAttribute('src'); v.load(); render(); document.getElementById('status').textContent='当前任务没有可标注视频'; }
+        else { marks=[]; clearVideos(); render(); document.getElementById('status').textContent='当前任务没有可标注视频'; }
       }).catch(error=>document.getElementById('status').textContent='加载失败：'+error.message);
     }
     fetchData();
@@ -213,16 +382,61 @@ PAGE = r'''<!doctype html>
       if (Array.isArray(record)) return record;
       return Array.isArray(record?.marks) ? record.marks : [];
     }
+    function wristEpisode(episode, side) {
+      return episode.replace('/observation.images.cam_high/', `/observation.images.cam_${side}_wrist/`);
+    }
+    function videoUrl(episode) {
+      const rootQuery = APP_MODE === 'verify' ? '&root=' + encodeURIComponent(verifyRoot) : '';
+      return '/video?task='+encodeURIComponent(task)+'&metric='+encodeURIComponent(metric)+'&episode=' + encodeURIComponent(episode) + rootQuery;
+    }
+    function clearVideos() {
+      allVideos.forEach(video => {
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+      });
+    }
+    function syncWristTimes(time, tolerance = 0.015) {
+      wristVideos.forEach(video => {
+        if (video.readyState < 1) return;
+        const target = Number.isFinite(video.duration) ? Math.min(time, video.duration) : time;
+        if (Math.abs(video.currentTime - target) > tolerance) video.currentTime = target;
+      });
+    }
+    function playWristVideos() {
+      syncWristTimes(v.currentTime, 0.08);
+      wristVideos.forEach(video => video.play().catch(() => {}));
+    }
+    function pauseWristVideos() {
+      wristVideos.forEach(video => video.pause());
+    }
+    v.addEventListener('play', playWristVideos);
+    v.addEventListener('playing', playWristVideos);
+    v.addEventListener('pause', pauseWristVideos);
+    v.addEventListener('seeking', () => syncWristTimes(v.currentTime));
+    v.addEventListener('ratechange', () => {
+      wristVideos.forEach(video => {
+        video.defaultPlaybackRate = v.playbackRate;
+        video.playbackRate = v.playbackRate;
+      });
+    });
+    v.addEventListener('timeupdate', () => {
+      if (!v.paused) syncWristTimes(v.currentTime, 0.12);
+    });
+    wristVideos.forEach(video => video.addEventListener('loadedmetadata', () => {
+      syncWristTimes(v.currentTime);
+      if (!v.paused) video.play().catch(() => {});
+    }));
     function loadVideo() {
       marks = savedMarksFor(ep.value).map(x=>({...x}));
       render();
-      setPlaybackRate();
-      v.pause();
-      v.removeAttribute('src');
-      v.load();
-      const rootQuery = APP_MODE === 'verify' ? '&root=' + encodeURIComponent(verifyRoot) : '';
-      v.src = '/video?task='+encodeURIComponent(task)+'&metric='+encodeURIComponent(metric)+'&episode=' + encodeURIComponent(ep.value) + rootQuery;
-      v.load();
+      clearVideos();
+      const mainEpisode = ep.value;
+      const sources = [mainEpisode, wristEpisode(mainEpisode, 'left'), wristEpisode(mainEpisode, 'right')];
+      allVideos.forEach((video, index) => {
+        video.src = videoUrl(sources[index]);
+        video.load();
+      });
       setPlaybackRate();
       v.focus();
     }
@@ -240,14 +454,24 @@ PAGE = r'''<!doctype html>
         episodes = xs; saved = {}; marks = [];
         ep.innerHTML = xs.map(x => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('');
         if (xs.length) loadVideo();
-        else { v.removeAttribute('src'); v.load(); render(); document.getElementById('status').textContent = '该路径下没有头视角视频'; }
-        document.getElementById('status').textContent = `找到 ${xs.length} 个头视角视频`;
+        else { clearVideos(); render(); document.getElementById('status').textContent = '该路径下没有可核验的 episode'; }
+        document.getElementById('status').textContent = `找到 ${xs.length} 个 episode`;
       }).catch(error => document.getElementById('status').textContent = '加载失败：'+error.message);
     }
     function escapeHtml(value) {
       return String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     }
-    function frame() { return Math.max(0, Math.round(v.currentTime * 25)); }
+    function frame() { return Math.max(0, Math.round(v.currentTime * VIDEO_FPS)); }
+    function stepFrame(direction) {
+      if (!Number.isFinite(v.duration) || v.duration <= 0) return;
+      v.pause();
+      const maxFrame = Math.floor(v.duration * VIDEO_FPS);
+      const targetFrame = Math.max(0, Math.min(maxFrame, frame() + direction));
+      const targetTime = targetFrame / VIDEO_FPS;
+      v.currentTime = targetTime;
+      syncWristTimes(targetTime);
+      document.getElementById('status').textContent = `${direction < 0 ? '后退' : '前进'}一帧：第 ${targetFrame} 帧（${targetTime.toFixed(3)} 秒）`;
+    }
     function addMark(key) {
       if (APP_MODE === 'verify') return;
       key = String(key).toLowerCase();
@@ -270,10 +494,14 @@ PAGE = r'''<!doctype html>
     }
     document.addEventListener('keydown', e => {
       const key = (e.key || '').toLowerCase();
-      if ((key === 'j' || key === 'k' || key === 'd') && e.target.tagName !== 'SELECT' && episodes.length) { e.preventDefault(); const n=ep.selectedIndex+(key==='j'?-1:1); ep.selectedIndex=(n+episodes.length)%episodes.length; loadVideo(); return; }
+      const isFormInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName);
+      if (e.ctrlKey || e.altKey || e.metaKey || isFormInput) return;
+      if ((key === 'j' || key === 'k') && episodes.length) { e.preventDefault(); const n=ep.selectedIndex+(key==='j'?-1:1); ep.selectedIndex=(n+episodes.length)%episodes.length; loadVideo(); return; }
+      if (key === 'a' || key === 'arrowleft') { e.preventDefault(); stepFrame(-1); return; }
+      if (key === 'd' || key === 'arrowright') { e.preventDefault(); stepFrame(1); return; }
       if (APP_MODE === 'verify') return;
-      if (key === 'c' && e.target.tagName !== 'SELECT' && !e.ctrlKey && !e.altKey && !e.metaKey && undoLastSiaMark()) { e.preventDefault(); return; }
-      if (!ALLOWED_KEYS.includes(key) || e.target.tagName === 'SELECT' || e.ctrlKey || e.altKey || e.metaKey) return;
+      if (key === 'c' && undoLastSiaMark()) { e.preventDefault(); return; }
+      if (!ALLOWED_KEYS.includes(key)) return;
       e.preventDefault();
       addMark(key);
       document.getElementById('status').textContent = '已标注 ' + key.toUpperCase() + '：第 ' + frame() + ' 帧（' + v.currentTime.toFixed(3) + ' 秒）';
@@ -662,16 +890,19 @@ class Handler(BaseHTTPRequestHandler):
                             not verify_root_input or not os.path.isdir(verify_root) or
                             os.path.commonpath((normalized, verify_root)) != verify_root or
                             not os.path.isfile(normalized) or
-                            os.path.basename(os.path.dirname(normalized)) != 'observation.images.cam_high' or
+                            os.path.basename(os.path.dirname(normalized)) not in VIDEO_CAMERA_DIRECTORIES or
                             not normalized.endswith('.mp4')):
                         raise ValueError('invalid verify video path')
                     self.serve_video(normalized)
                     return
                 root = task_config(request_task, request_metric)['video_root']
                 if not (path.startswith(root + '/') and allowed_video_path(path, root) and
-                        '/observation.images.cam_high/' in path and path.endswith('.mp4')):
+                        os.path.basename(os.path.dirname(path)) in VIDEO_CAMERA_DIRECTORIES and
+                        path.endswith('.mp4')):
                     raise ValueError('invalid video path')
-                if local_task_root(request_task) and os.path.isfile(path):
+                if local_task_root(request_task):
+                    if not os.path.isfile(path):
+                        raise ValueError('video file does not exist')
                     self.serve_video(path)
                     return
                 else:

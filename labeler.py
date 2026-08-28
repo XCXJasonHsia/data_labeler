@@ -379,7 +379,7 @@ PAGE = r'''<!doctype html>
     const VERIFY_DATA_ROOT = __VERIFY_DATA_ROOT__;
     const ALLOWED_KEYS = ['b', 's', 'e'];
     const VIDEO_FPS = 25;
-    let task = DEFAULT_TASK, metric = 'SIA+CSPC', episodes = [], marks = [], saved = {}, requestVersion = 0, v = document.getElementById('v');
+    let task = DEFAULT_TASK, metric = 'SIA+CSPC', episodes = [], marks = [], saved = {}, requestVersion = 0, wristPlaybackWanted = false, v = document.getElementById('v');
     const leftWristVideo = document.getElementById('left-wrist-video');
     const rightWristVideo = document.getElementById('right-wrist-video');
     const wristVideos = [leftWristVideo, rightWristVideo];
@@ -475,6 +475,7 @@ PAGE = r'''<!doctype html>
       return '/video?task='+encodeURIComponent(task)+'&metric='+encodeURIComponent(metric)+'&episode=' + encodeURIComponent(episode);
     }
     function clearVideos() {
+      wristPlaybackWanted = false;
       allVideos.forEach(video => {
         video.pause();
         video.removeAttribute('src');
@@ -488,16 +489,28 @@ PAGE = r'''<!doctype html>
         if (Math.abs(video.currentTime - target) > tolerance) video.currentTime = target;
       });
     }
-    function playWristVideos() {
+    function syncWristPlayback() {
       syncWristTimes(v.currentTime, 0.08);
-      wristVideos.forEach(video => video.play().catch(() => {}));
+      wristVideos.forEach(video => {
+        if (!wristPlaybackWanted) {
+          if (!video.paused) video.pause();
+          return;
+        }
+        video.play().catch(() => {});
+      });
+    }
+    function playWristVideos() {
+      wristPlaybackWanted = true;
+      syncWristPlayback();
     }
     function pauseWristVideos() {
+      wristPlaybackWanted = false;
       wristVideos.forEach(video => video.pause());
     }
     v.addEventListener('play', playWristVideos);
     v.addEventListener('playing', playWristVideos);
     v.addEventListener('pause', pauseWristVideos);
+    v.addEventListener('waiting', () => wristVideos.forEach(video => video.pause()));
     v.addEventListener('seeking', () => syncWristTimes(v.currentTime));
     v.addEventListener('ratechange', () => {
       wristVideos.forEach(video => {
@@ -508,10 +521,14 @@ PAGE = r'''<!doctype html>
     v.addEventListener('timeupdate', () => {
       if (!v.paused) syncWristTimes(v.currentTime, 0.12);
     });
-    wristVideos.forEach(video => video.addEventListener('loadedmetadata', () => {
-      syncWristTimes(v.currentTime);
-      if (!v.paused) video.play().catch(() => {});
-    }));
+    wristVideos.forEach(video => {
+      ['loadedmetadata', 'canplay', 'playing'].forEach(eventName => {
+        video.addEventListener(eventName, () => {
+          if (wristPlaybackWanted && !v.paused) syncWristPlayback();
+          else syncWristTimes(v.currentTime);
+        });
+      });
+    });
     function loadVideo() {
       marks = savedMarksFor(ep.value).map(x=>({...x}));
       updateEpisodeContext();

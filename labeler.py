@@ -12,6 +12,7 @@ to the local disk.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import html
 import json
 import shlex
@@ -36,12 +37,35 @@ REMOTE_ANNOT = (
     "/mnt/public2/xiachenxiang/data/VOC-MEM/press_by_number/"
     "exceptional_intervals.json"
 )
-LOCAL_ANNOT = os.path.join(os.path.dirname(__file__), "organize_table_sia_annotations.json")
+LOCAL_ANNOT = os.path.join(os.path.dirname(__file__), "organize_table_sia_cspc_annotations.json")
 LOCAL_SCREENSHOTS = os.path.join(os.path.dirname(__file__), "press_by_number_screenshots")
 FPS = 25
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "tasks.yaml")
 ANNOTATION_LOCK = threading.Lock()
-ALLOWED_VIDEO_GROUPS = ('ST-1', 'ST-HQ-EMB', 'ST-ENV', 'ST-HQ-ENV')
+DEFAULT_METRIC = 'SIA+CSPC'
+METRIC_DEFINITIONS = {
+    'SIA+CSPC': {
+        'markers': ['s'],
+        'kind': 'nodes',
+        'groups': ['ST-1', 'ST-HQ-EMB', 'ST-HQ-ENV', 'ST-2'],
+    },
+    'VOC-MEM': {
+        'markers': ['b', 's', 'e'],
+        'kind': 'interval',
+        'groups': ['ST-1', 'ST-HQ-EMB', 'ST-HQ-ENV'],
+    },
+    'FPL+TRR': {
+        'markers': ['s'],
+        'kind': 'nodes',
+        'groups': ['FRT-*'],
+    },
+}
+LEGACY_METRICS = {'SIA': 'SIA+CSPC'}
+METRIC_FILE_SLUGS = {
+    'SIA+CSPC': 'sia_cspc',
+    'VOC-MEM': 'voc-mem',
+    'FPL+TRR': 'fpl_trr',
+}
 VIDEO_CAMERA_DIRECTORIES = (
     'observation.images.cam_high',
     'observation.images.cam_left_wrist',
@@ -59,53 +83,66 @@ DATASET_GROUP_DOMAINS = {
 TASKS = {
     'organize_table': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/organize_table',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/organize_table/exceptional_intervals.json',
-                       'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
+                       'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
     'store_laptop_and_headphones': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/store_laptop_and_headphone',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/store_laptop_and_headphones/exceptional_intervals.json',
-                       'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
+                       'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
     'arrange_largest_number': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/arrange_largest_number',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/arrange_largest_number/exceptional_intervals.json',
-                       'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
+                       'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
     'fold_clothes': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/fold_clothes',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/fold_clothes/exceptional_intervals.json',
-                       'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
+                       'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
     'hang_mugs': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/hang_mugs',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/hang_mugs/exceptional_intervals.json',
-                       'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
+                       'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
     'make_toast': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/make_toast',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/make_toast/exceptional_intervals.json',
-                       'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
+                       'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
     'put_bottles_into_dustbin': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/put_bottles_into_dustbin',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/put_bottles_into_dustbin/exceptional_intervals.json',
-                       'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
+                       'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
     'stack_blocks': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/stack_blocks',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/stack_blocks/exceptional_intervals.json',
-                       'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
+                       'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
-    'sweep_block': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/sweep_block',
+    'sweep_block': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/sweep_blocks',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/sweep_block/exceptional_intervals.json',
-                       'metrics': {'SIA': {'markers': ['s'], 'kind': 'nodes'},
+                       'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
 }
+
+def canonical_metric(metric: str) -> str:
+    return LEGACY_METRICS.get(metric, metric)
+
 
 def load_tasks():
     global TASKS
     if yaml and os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, encoding='utf-8') as f:
             TASKS = yaml.safe_load(f) or TASKS
+    for task_data in TASKS.values():
+        configured_metrics = task_data.get('metrics', {})
+        normalized_metrics = {}
+        for metric, defaults in METRIC_DEFINITIONS.items():
+            legacy_name = 'SIA' if metric == 'SIA+CSPC' else metric
+            configured = configured_metrics.get(metric, configured_metrics.get(legacy_name, {}))
+            normalized_metrics[metric] = {**defaults, **configured, 'groups': defaults['groups']}
+        task_data['metrics'] = normalized_metrics
 load_tasks()
 CURRENT_TASK = 'press_by_number'
 MODE = 'label'
 
 
-def task_config(task: str, metric: str = 'SIA') -> dict:
+def task_config(task: str, metric: str = DEFAULT_METRIC) -> dict:
+    metric = canonical_metric(metric)
     task_data = TASKS[task]
     metric_data = task_data['metrics'][metric]
     return {**task_data, **metric_data}
@@ -193,6 +230,10 @@ PAGE = r'''<!doctype html>
     #label-controls { display: contents; }
     .field { display: flex; min-width: 150px; flex-direction: column; gap: 5px; color: #475569; font-size: 12px; font-weight: 700; }
     .episode-field { min-width: 260px; flex: 1 1 360px; }
+    .episode-context { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; margin: 0 0 16px; }
+    .context-item { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: white; }
+    .context-item span { display: block; margin-bottom: 2px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; }
+    .context-item strong { color: #1e3a8a; font-size: 15px; }
     select, input {
       width: 100%;
       min-height: 40px;
@@ -260,6 +301,7 @@ PAGE = r'''<!doctype html>
       #verify-load { width: 100%; }
       .toolbar, .field, .episode-field { width: 100%; min-width: 0; }
       .toolbar button { flex: 1 1 calc(50% - 8px); }
+      .episode-context { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
@@ -273,7 +315,7 @@ PAGE = r'''<!doctype html>
       <div class="sync-badge">三视角同步 · 25 FPS</div>
     </header>
     <p id="label-help" class="guide annotation-only">选择 episode 后，在主视角点击播放并使用
-      <span id="key-help"></span>。按键记录当前视频帧；SIA 下按 <span class="key">c</span> 撤销最近一次标注。按 <span class="key">a / ←</span> 后退一帧，按 <span class="key">d / →</span> 前进一帧。按 <span class="key">j</span> 切换上一个视频，按 <span class="key">k</span> 切换下一个视频。</p>
+      <span id="key-help"></span>。按键记录当前视频帧；点标注指标下按 <span class="key">c</span> 撤销最近一次标注。按 <span class="key">a / ←</span> 后退一帧，按 <span class="key">d / →</span> 前进一帧。按 <span class="key">j</span> 切换上一个视频，按 <span class="key">k</span> 切换下一个视频。</p>
     <div id="verify-controls" hidden>
       <div class="verify-row">
         <label class="field verify-field">视频目录 <input id="verify-path" type="text" placeholder="请输入包含三视角视频的绝对路径"></label>
@@ -291,6 +333,12 @@ PAGE = r'''<!doctype html>
       <button class="annotation-only danger-button" onclick="clearMarks()">清空本集</button>
       <button class="annotation-only" onclick="transfer()">Transfer all</button>
       <button class="annotation-only" onclick="syncDataset()">同步全部到 dataset_sim</button>
+    </section>
+    <section id="episode-context" class="episode-context annotation-only">
+      <div class="context-item"><span>当前指标</span><strong id="current-metric">—</strong></div>
+      <div class="context-item"><span>数据分组</span><strong id="current-group">—</strong></div>
+      <div class="context-item"><span>错误类型编号</span><strong id="current-error-type">—</strong></div>
+      <div class="context-item"><span>Episode 类别</span><strong id="current-episode-kind">—</strong></div>
     </section>
     <div class="video-layout">
       <div class="video-panel">
@@ -322,7 +370,7 @@ PAGE = r'''<!doctype html>
     const APP_MODE = __APP_MODE__;
     const ALLOWED_KEYS = ['b', 's', 'e'];
     const VIDEO_FPS = 25;
-    let task = DEFAULT_TASK, metric = 'SIA', episodes = [], marks = [], saved = {}, verifyRoot = '', requestVersion = 0, v = document.getElementById('v');
+    let task = DEFAULT_TASK, metric = 'SIA+CSPC', episodes = [], marks = [], saved = {}, verifyRoot = '', requestVersion = 0, v = document.getElementById('v');
     const leftWristVideo = document.getElementById('left-wrist-video');
     const rightWristVideo = document.getElementById('right-wrist-video');
     const wristVideos = [leftWristVideo, rightWristVideo];
@@ -359,14 +407,16 @@ PAGE = r'''<!doctype html>
       metricEl.innerHTML=metricNames.map(x=>`<option value="${x}">${x}</option>`).join('');
       metricEl.value=metricNames.includes(previousMetric) ? previousMetric : metricNames[0];
       metric=metricEl.value;
+      const metricConfig=TASKS[task].metrics[metric];
+      document.getElementById('key-help').innerHTML=metricConfig.markers.map(key=>`<span class="key">${key}</span>`).join(' ');
       const requestedTask=task, requestedMetric=metric, currentRequest=++requestVersion;
       Promise.all([
         fetch('/annotations?task='+encodeURIComponent(requestedTask)+'&metric='+encodeURIComponent(requestedMetric)).then(r=>r.json()),
-        fetch('/episodes?task='+encodeURIComponent(requestedTask)).then(r=>r.json()),
+        fetch('/episodes?task='+encodeURIComponent(requestedTask)+'&metric='+encodeURIComponent(requestedMetric)).then(r=>r.json()),
       ]).then(([a,xs])=>{
         if (currentRequest !== requestVersion || task !== requestedTask || metric !== requestedMetric) return;
         saved=a; episodes=xs;
-        ep.innerHTML=xs.map(x=>`<option value="${x}">${saved[x]?'✓':'○'} ${x.split('/').slice(-5,-4)[0]}</option>`).join('');
+        ep.innerHTML=xs.map(x=>`<option value="${escapeHtml(x)}">${saved[x]?'✓':'○'} ${escapeHtml(episodeLabel(x))}</option>`).join('');
         if (xs.length) loadVideo();
         else { marks=[]; clearVideos(); render(); document.getElementById('status').textContent='当前任务没有可标注视频'; }
       }).catch(error=>document.getElementById('status').textContent='加载失败：'+error.message);
@@ -381,6 +431,31 @@ PAGE = r'''<!doctype html>
       const record=saved[episode];
       if (Array.isArray(record)) return record;
       return Array.isArray(record?.marks) ? record.marks : [];
+    }
+    function episodeInfo(episode) {
+      const normalized=String(episode || '').replaceAll('\\', '/');
+      const root=(TASKS[task]?.video_root || '').replace(/\/$/, '');
+      const relative=root && normalized.startsWith(root + '/') ? normalized.slice(root.length + 1) : normalized;
+      const parts=relative.split('/');
+      const group=parts[0] || '—';
+      const episodeName=parts.includes('videos') ? parts[parts.indexOf('videos') - 1] : (parts.at(-1) || '—');
+      const regular=relative.match(/(?:^|\/)FRT-(\d+)\/FRT-\d+-(\d+)\/FRT-\d+-\d+-([abc])(?:\/|$)/i);
+      const domain=relative.match(/(?:^|\/)FRT-(\d+)\/FRT-\d+-(EMB|ENV)(?:\/|$)/i);
+      if (regular) return {group, episodeName, errorType:`${regular[1]}-${regular[2]}`, episodeKind:regular[3].toLowerCase()};
+      if (domain) return {group, episodeName, errorType:domain[1], episodeKind:domain[2].toUpperCase()};
+      return {group, episodeName, errorType:'—', episodeKind:'—'};
+    }
+    function episodeLabel(episode) {
+      const info=episodeInfo(episode);
+      if (metric === 'FPL+TRR') return `${info.group} · 错误 ${info.errorType} · ${info.episodeKind} · ${info.episodeName}`;
+      return `${info.group} · ${info.episodeName}`;
+    }
+    function updateEpisodeContext() {
+      const info=episodeInfo(ep.value);
+      document.getElementById('current-metric').textContent=metric;
+      document.getElementById('current-group').textContent=info.group;
+      document.getElementById('current-error-type').textContent=info.errorType;
+      document.getElementById('current-episode-kind').textContent=info.episodeKind;
     }
     function wristEpisode(episode, side) {
       return episode.replace('/observation.images.cam_high/', `/observation.images.cam_${side}_wrist/`);
@@ -429,6 +504,7 @@ PAGE = r'''<!doctype html>
     }));
     function loadVideo() {
       marks = savedMarksFor(ep.value).map(x=>({...x}));
+      updateEpisodeContext();
       render();
       clearVideos();
       const mainEpisode = ep.value;
@@ -480,16 +556,16 @@ PAGE = r'''<!doctype html>
       persistLocal();
       document.getElementById('status').textContent = 'Marked ' + key.toUpperCase() + ' at frame ' + frame();
     }
-    function undoLastSiaMark() {
-      if (metric !== 'SIA') return false;
+    function undoLastNodeMark() {
+      if (TASKS[task].metrics[metric].kind !== 'nodes') return false;
       if (!marks.length) {
-        document.getElementById('status').textContent = '当前没有可撤销的 SIA 标注';
+        document.getElementById('status').textContent = `当前没有可撤销的 ${metric} 标注`;
         return true;
       }
       const removed = marks.pop();
       render();
       persistLocal();
-      document.getElementById('status').textContent = '已撤销第 ' + removed.frame + ' 帧的 SIA 标注';
+      document.getElementById('status').textContent = `已撤销 ${metric} 第 ${removed.frame} 帧的标注`;
       return true;
     }
     document.addEventListener('keydown', e => {
@@ -500,7 +576,7 @@ PAGE = r'''<!doctype html>
       if (key === 'a' || key === 'arrowleft') { e.preventDefault(); stepFrame(-1); return; }
       if (key === 'd' || key === 'arrowright') { e.preventDefault(); stepFrame(1); return; }
       if (APP_MODE === 'verify') return;
-      if (key === 'c' && undoLastSiaMark()) { e.preventDefault(); return; }
+      if (key === 'c' && undoLastNodeMark()) { e.preventDefault(); return; }
       if (!ALLOWED_KEYS.includes(key)) return;
       e.preventDefault();
       addMark(key);
@@ -530,7 +606,9 @@ PAGE = r'''<!doctype html>
     function render() { document.getElementById('rows').innerHTML = marks.map(m =>
       `<tr><td>${m.type}</td><td>${m.frame}</td><td>${m.time}s</td></tr>`).join('');
       updateTimeline();
-      document.getElementById('status').textContent = `当前 ${ep.value || ''}：${marks.length} 个标注点`; }
+      const info=episodeInfo(ep.value);
+      const errorText=metric === 'FPL+TRR' ? `，错误 ${info.errorType}，类别 ${info.episodeKind}` : '';
+      document.getElementById('status').textContent = `当前指标 ${metric}，${info.group} / ${info.episodeName}${errorText}：${marks.length} 个标注点`; }
     function clearMarks() { marks = []; render(); }
     function persistLocal() { fetch('/save', {method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({episode:ep.value, marks, duration:v.duration, task, metric})}).then(r => r.json()).then(x =>
@@ -563,7 +641,7 @@ PAGE = r'''<!doctype html>
           await seekToFrame(mark.time);
           ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
           const response = await fetch('/screenshot', {method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({episode: ep.value, frame: mark.frame})});
+            body:JSON.stringify({episode: ep.value, frame: mark.frame, task, metric})});
           if (!response.ok) throw new Error('截图保存失败：第 ' + mark.frame + ' 帧');
         }
       }
@@ -594,36 +672,37 @@ def remote(command: str, data: bytes | None = None) -> bytes:
 
 
 def local_task_root(task: str) -> str | None:
-    root = task_config(task, 'SIA')['video_root']
+    root = TASKS[task]['video_root']
     return root if os.path.isdir(root) else None
 
 
-def allowed_video_path(path: str, root: str) -> bool:
+def allowed_video_path(path: str, root: str, metric: str = DEFAULT_METRIC) -> bool:
     relative = os.path.relpath(path, root)
     group = relative.split(os.sep, 1)[0]
-    return not relative.startswith('..' + os.sep) and group in ALLOWED_VIDEO_GROUPS
+    patterns = METRIC_DEFINITIONS[canonical_metric(metric)]['groups']
+    return (relative != '..' and not relative.startswith('..' + os.sep) and
+            any(fnmatch.fnmatchcase(group, pattern) for pattern in patterns))
 
 
-def episodes(task=None) -> list[str]:
+def episodes(task=None, metric: str = DEFAULT_METRIC) -> list[str]:
     task = task or CURRENT_TASK
+    metric = canonical_metric(metric)
+    config = task_config(task, metric)
     root = local_task_root(task)
     if root:
         paths = []
-        for group in ALLOWED_VIDEO_GROUPS:
+        for group in config['groups']:
             paths.extend(glob.glob(
                 os.path.join(root, group, '**', 'observation.images.cam_high', '*.mp4'),
                 recursive=True,
             ))
         return sorted(paths)
-    remote_searches = ' '.join(
-        f"if [ -d {root} ]; then find {root} -type f -path '*/observation.images.cam_high/*.mp4'; fi;"
-        for root in (
-            shlex.quote(os.path.join(task_config(task, 'SIA')['video_root'], group))
-            for group in ALLOWED_VIDEO_GROUPS
-        )
+    quoted_root = shlex.quote(config['video_root'])
+    output = remote(
+        f"find {quoted_root} -type f -path '*/observation.images.cam_high/*.mp4' | sort"
     )
-    output = remote(f"{{ {remote_searches} }} | sort")
-    return output.decode().splitlines()
+    return [path for path in output.decode().splitlines()
+            if allowed_video_path(path, config['video_root'], metric)]
 
 def verify_episodes(root: str) -> list[str]:
     """Find all head-view videos below a user-supplied local directory."""
@@ -637,16 +716,25 @@ def verify_episodes(root: str) -> list[str]:
         recursive=True,
     ))
 
-def annotation_path(task=CURRENT_TASK, metric='SIA'):
-    return os.path.join(os.path.dirname(__file__), f'{task}_{metric.lower()}_annotations.json')
+def annotation_path(task=CURRENT_TASK, metric=DEFAULT_METRIC):
+    metric = canonical_metric(metric)
+    slug = METRIC_FILE_SLUGS.get(metric, metric.lower().replace('+', '_'))
+    return os.path.join(os.path.dirname(__file__), f'{task}_{slug}_annotations.json')
 
-def read_local(task=CURRENT_TASK, metric='SIA'):
-    try:
-        with open(annotation_path(task, metric), encoding='utf-8') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError): return {}
+def read_local(task=CURRENT_TASK, metric=DEFAULT_METRIC):
+    metric = canonical_metric(metric)
+    paths = [annotation_path(task, metric)]
+    if metric == 'SIA+CSPC':
+        paths.append(os.path.join(os.path.dirname(__file__), f'{task}_sia_annotations.json'))
+    for path in paths:
+        try:
+            with open(path, encoding='utf-8') as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            continue
+    return {}
 
-def write_local(data, task=CURRENT_TASK, metric='SIA'):
+def write_local(data, task=CURRENT_TASK, metric=DEFAULT_METRIC):
     path = annotation_path(task, metric)
     tmp = path + '.tmp'
     with open(tmp, 'w', encoding='utf-8') as f: json.dump(data, f, ensure_ascii=False, indent=2)
@@ -664,7 +752,7 @@ def update_local_annotation(record):
 
 def make_frames(record):
     marks = record.get('marks', [])
-    config = task_config(record.get('task', CURRENT_TASK), record.get('metric', 'SIA'))
+    config = task_config(record.get('task', CURRENT_TASK), record.get('metric', DEFAULT_METRIC))
     if any(m.get('type') not in config['markers'] for m in marks):
         raise ValueError(f"invalid marker type in {record.get('episode')}")
     if config['kind'] == 'nodes':
@@ -739,8 +827,8 @@ def dataset_episode_map(task: str) -> dict[str, str]:
 
 
 def dataset_annotation_value(record: dict) -> tuple[str, list[dict]]:
-    metric = record.get('metric', 'SIA')
-    if metric == 'SIA':
+    metric = canonical_metric(record.get('metric', DEFAULT_METRIC))
+    if metric == 'SIA+CSPC':
         frames = sorted({int(mark['frame']) for mark in record.get('marks', [])})
         return 'subtask_segments', [
             {'id': f'{index:03d}', 'subtask_frame': frame}
@@ -860,7 +948,7 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
         request_task = query.get('task', [CURRENT_TASK])[0]
-        request_metric = query.get('metric', ['SIA'])[0]
+        request_metric = canonical_metric(query.get('metric', [DEFAULT_METRIC])[0])
         try:
             if parsed.path == '/':
                 body, content_type = PAGE.encode(), 'text/html; charset=utf-8'
@@ -874,7 +962,7 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_json({'error': str(exc)}, 400)
                         return
                 else:
-                    body, content_type = json.dumps(episodes(request_task)).encode(), 'application/json'
+                    body, content_type = json.dumps(episodes(request_task, request_metric)).encode(), 'application/json'
             elif parsed.path == '/annotations':
                 if MODE == 'verify':
                     self.send_error(403, 'verify mode is read-only')
@@ -896,7 +984,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.serve_video(normalized)
                     return
                 root = task_config(request_task, request_metric)['video_root']
-                if not (path.startswith(root + '/') and allowed_video_path(path, root) and
+                if not (path.startswith(root + '/') and allowed_video_path(path, root, request_metric) and
                         os.path.basename(os.path.dirname(path)) in VIDEO_CAMERA_DIRECTORIES and
                         path.endswith('.mp4')):
                     raise ValueError('invalid video path')
@@ -953,8 +1041,9 @@ class Handler(BaseHTTPRequestHandler):
                 if frame < 0:
                     raise ValueError('invalid frame')
                 selected_task = obj.get('task', CURRENT_TASK)
-                root = task_config(selected_task)['video_root']
-                if not (episode.startswith(root + '/') and allowed_video_path(episode, root) and episode.endswith('.mp4') and
+                selected_metric = canonical_metric(obj.get('metric', DEFAULT_METRIC))
+                root = task_config(selected_task, selected_metric)['video_root']
+                if not (episode.startswith(root + '/') and allowed_video_path(episode, root, selected_metric) and episode.endswith('.mp4') and
                         '/observation.images.cam_high/' in episode):
                     raise ValueError('invalid episode path')
                 episode_name = os.path.basename(episode.split('/videos/')[0].rstrip('/'))
@@ -1009,7 +1098,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('远端存储目录必须是绝对路径')
                 if any(part in ('', '.', '..') for part in directory.split('/')[1:]):
                     raise ValueError('远端存储目录路径不合法')
-                data = read_local(request.get('task', CURRENT_TASK), request.get('metric', 'SIA'))
+                data = read_local(request.get('task', CURRENT_TASK), request.get('metric', DEFAULT_METRIC))
                 if not data: raise ValueError('No locally processed episodes to transfer')
                 output = [{'episode': k, 'frames': make_frames(v)} for k, v in data.items()]
                 payload = json.dumps(output, ensure_ascii=False, indent=2).encode()
@@ -1033,13 +1122,15 @@ class Handler(BaseHTTPRequestHandler):
             parts = obj.get('episode', '').split('/')
             try:
                 selected_task = obj.get('task', CURRENT_TASK)
-                video_root = task_config(selected_task, obj.get('metric', 'SIA'))['video_root']
-                if not allowed_video_path(obj.get('episode', ''), video_root):
-                    raise ValueError('selected video is outside the allowed ST groups')
+                selected_metric = canonical_metric(obj.get('metric', DEFAULT_METRIC))
+                video_root = task_config(selected_task, selected_metric)['video_root']
+                if not allowed_video_path(obj.get('episode', ''), video_root, selected_metric):
+                    raise ValueError('selected video is outside the groups allowed for this metric')
                 task_root = video_root.rstrip('/').split('/')[-1]
                 idx = parts.index(task_root)
-                obj.update(task=selected_task, metric=obj.get('metric', 'SIA'), group=parts[idx + 1],
-                           episode_name=parts[idx + 2], gap=20)
+                episode_name = os.path.basename(obj['episode'].split('/videos/')[0].rstrip('/'))
+                obj.update(task=selected_task, metric=selected_metric, group=parts[idx + 1],
+                           episode_name=episode_name, gap=20)
             except (ValueError, IndexError):
                 raise ValueError('selected video path does not contain task/group/episode')
             update_local_annotation(obj)
@@ -1068,7 +1159,7 @@ def main() -> None:
     config = task_config(CURRENT_TASK)
     REMOTE_VIDEO = config['video_root']
     REMOTE_ANNOT = config['annotation']
-    LOCAL_ANNOT = annotation_path(CURRENT_TASK, 'SIA')
+    LOCAL_ANNOT = annotation_path(CURRENT_TASK, DEFAULT_METRIC)
     LOCAL_SCREENSHOTS = os.path.join(os.path.dirname(__file__), f'{CURRENT_TASK}_screenshots')
     PAGE = PAGE.replace('__TASKS__', json.dumps(TASKS))
     PAGE = PAGE.replace('__DEFAULT_TASK__', json.dumps(CURRENT_TASK))

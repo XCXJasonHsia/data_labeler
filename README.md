@@ -18,13 +18,15 @@
 
 `store_laptop_and_headphones` 对应实际目录名 `store_laptop_and_headphone`。
 
-每个任务均支持 `SIA` 和 `VOC-MEM` 两种 metric。两种 metric 都只读取任务目录中的以下数据：
+每个任务均支持三种 metric，各指标读取的数据范围不同：
 
-- `ST-1`
-- `ST-HQ-EMB`
-- `ST-HQ-ENV`
+| Metric | 读取的数据 |
+| --- | --- |
+| `VOC-MEM` | `ST-1`、`ST-HQ-EMB`、`ST-HQ-ENV` |
+| `SIA+CSPC` | `ST-1`、`ST-HQ-EMB`、`ST-HQ-ENV`、`ST-2` |
+| `FPL+TRR` | 所有顶层 `FRT-*` 数据，包括常规 `a/b/c`、`EMB` 和 `ENV` |
 
-程序会忽略 `ST-2` 和所有 `FRT-*` 数据。程序根据各 episode 下的 `observation.images.cam_high/*.mp4` 主视角视频生成列表，并同时加载同一 episode 的以下三个视角：
+程序根据各 episode 下的 `observation.images.cam_high/*.mp4` 主视角视频生成列表，并同时加载同一 episode 的以下三个视角：
 
 - `observation.images.cam_high`：主视角。
 - `observation.images.cam_left_wrist`：左手腕部相机视角。
@@ -137,12 +139,21 @@ deactivate
 
 切换 episode 后会保留当前播放速度。三个视频接口均支持 HTTP Range 分段加载，可以直接拖动主视角的浏览器进度条或点击标注时间轴跳转，不需要等待完整视频下载完成。
 
-### SIA
+页面会始终显示当前 metric 和数据分组。选择 `FPL+TRR` 时，还会从目录名中解析并显示错误类型数字编号和 episode 类别。例如路径中的 `FRT-4/FRT-4-2/FRT-4-2-b` 会显示错误类型 `4-2`、episode 类别 `b`；`FRT-4-EMB` 和 `FRT-4-ENV` 会分别显示 `EMB` 和 `ENV`。
+
+### SIA+CSPC
 
 - `s`：标注当前视频帧。
 - `c`：撤销当前视频最近一次标注。
 
 每次按 `s` 或 `c` 后，当前 episode 的结果都会立即写入本地 JSON，无需额外点击保存。
+
+### FPL+TRR
+
+- `s`：标注当前视频帧。
+- `c`：撤销当前视频最近一次标注。
+
+FPL+TRR 只显示 `FRT-*` 数据，episode 下拉框和视频上方的信息卡会同时显示错误编号和 `a/b/c` 类别。
 
 ### VOC-MEM
 
@@ -171,8 +182,12 @@ VOC-MEM 标注必须从 `b` 开始、以 `e` 结束；`s` 必须位于对应的 
 标注文件保存在仓库根目录，并按照 task 和 metric 分开存储：
 
 ```text
-<task>_<metric>_annotations.json
+<task>_sia_cspc_annotations.json
+<task>_voc-mem_annotations.json
+<task>_fpl_trr_annotations.json
 ```
+
+升级前已有的 `<task>_sia_annotations.json` 会作为 `SIA+CSPC` 的历史标注兼容读取；下一次保存后会写入新的 `sia_cspc` 文件。
 
 例如：
 
@@ -201,7 +216,7 @@ hang_mugs_voc-mem_annotations.json
 /mnt/public2/liushengbang/vmbmk/dataset_sim/<task>/episodes/<episode>/annotation.json
 ```
 
-SIA 结果写入 `subtask_segments`，VOC-MEM 结果写入 `voc_mem`。同步只替换对应 metric 的字段，保留 `annotation.json` 中已有的其他标注字段。程序按照原始视频分组和 `dataset_sim` 的 `success/domain` 元数据匹配对应视频；找不到匹配视频或标注格式不完整的记录会被跳过，并在页面显示数量。
+SIA+CSPC 结果写入 `subtask_segments`，VOC-MEM 结果写入 `voc_mem`。同步只替换对应 metric 的字段，保留 `annotation.json` 中已有的其他标注字段。程序按照原始视频分组和 `dataset_sim` 的 `success/domain` 元数据匹配对应视频；FPL+TRR 或其他找不到匹配视频、标注格式不完整的记录会被跳过，并在页面显示数量。
 
 目标文件名是 VMBMK 数据集现有格式使用的 `annotation.json`（单数）。
 
@@ -222,17 +237,20 @@ hang_mugs:
   video_root: /mnt/public2/liushengbang/data/Veified_Data/hang_mugs
   annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/hang_mugs/exceptional_intervals.json
   metrics:
-    SIA:
+    SIA+CSPC:
       markers: [s]
       kind: nodes
     VOC-MEM:
       markers: [b, s, e]
       kind: interval
+    FPL+TRR:
+      markers: [s]
+      kind: nodes
 ```
 
 当前 `annotation` 字段不会被 `Transfer all` 自动采用；实际导出位置仍以页面中手动输入的目标目录为准。
 
-添加任务时，需要确保 `video_root` 下存在允许的 ST 数据目录，并保持 episode 视频路径结构一致。
+添加任务时，需要确保 `video_root` 下存在对应的 ST 或 FRT 数据目录，并保持 episode 视频路径结构一致。各 metric 的实际目录范围由程序统一规则控制，不需要在每个 task 中重复填写。
 
 ## 常见问题
 
@@ -250,7 +268,7 @@ python labeler.py --port 8766
 
 ### 任务没有视频
 
-检查 `tasks.yaml` 中的 `video_root` 是否存在，并确认数据位于 `ST-1`、`ST-HQ-EMB` 或 `ST-HQ-ENV` 下。程序不会显示 `ST-2` 和 `FRT-*` 视频。
+检查 `tasks.yaml` 中的 `video_root` 是否存在，并确认当前 metric 对应的数据目录存在：VOC-MEM 使用三类 ST，SIA+CSPC 额外使用 `ST-2`，FPL+TRR 使用 `FRT-*`。
 
 ### 出现 SSH 主机指纹提示
 
@@ -258,4 +276,4 @@ python labeler.py --port 8766
 
 ### 已有标注没有显示
 
-确认标注文件名中的 task 和 metric 与页面选择一致，例如 `hang_mugs_sia_annotations.json`。切换任务后等待 episode 列表加载完成；必要时重启服务并强制刷新浏览器。
+确认标注文件名中的 task 和 metric 与页面选择一致，例如 `hang_mugs_sia_cspc_annotations.json`。旧的 `hang_mugs_sia_annotations.json` 仍会兼容读取。切换任务后等待 episode 列表加载完成；必要时重启服务并强制刷新浏览器。

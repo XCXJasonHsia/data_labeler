@@ -1,12 +1,8 @@
-"""Local web UI for labeling exceptional ``press_by_number`` intervals.
+"""Local web UI for simulation-data labeling and read-only review.
 
 Run this script locally::
 
-    python press_by_number_labeler.py --port 8765
-
-The browser connects to this local server. The server uses SSH to read the
-remote videos and to write the annotation JSON; remote videos are not copied
-to the local disk.
+    python labeler.py --port 8765
 """
 
 from __future__ import annotations
@@ -30,8 +26,10 @@ from urllib.parse import parse_qs, urlparse
 
 
 SSH = ["ssh", "-p", "41070", "root@183.233.148.6"]
+LABEL_DATA_ROOT = '/mnt/public2/liushengbang/data/Veified_Data'
+VERIFY_DATA_ROOT = '/mnt/public2/liushengbang/data/RoboDojo_Dataset_to_VMB'
 REMOTE_VIDEO = (
-    "/mnt/public2/liushengbang/data/RoboDojo_Dataset_to_VMB/press_by_number"
+    "/mnt/public2/liushengbang/data/Veified_Data/press_by_number"
 )
 REMOTE_ANNOT = (
     "/mnt/public2/xiachenxiang/data/VOC-MEM/press_by_number/"
@@ -123,12 +121,22 @@ def canonical_metric(metric: str) -> str:
     return LEGACY_METRICS.get(metric, metric)
 
 
+def path_within(path: str, root: str) -> bool:
+    try:
+        normalized_root = os.path.realpath(root)
+        return os.path.commonpath((os.path.realpath(path), normalized_root)) == normalized_root
+    except (TypeError, ValueError):
+        return False
+
+
 def load_tasks():
     global TASKS
     if yaml and os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, encoding='utf-8') as f:
             TASKS = yaml.safe_load(f) or TASKS
-    for task_data in TASKS.values():
+    for task, task_data in TASKS.items():
+        if not path_within(task_data.get('video_root', ''), LABEL_DATA_ROOT):
+            raise ValueError(f'{task} 的标注视频目录必须位于 {LABEL_DATA_ROOT}')
         configured_metrics = task_data.get('metrics', {})
         normalized_metrics = {}
         for metric, defaults in METRIC_DEFINITIONS.items():
@@ -318,10 +326,10 @@ PAGE = r'''<!doctype html>
       <span id="key-help"></span>。按键记录当前视频帧；点标注指标下按 <span class="key">c</span> 撤销最近一次标注。按 <span class="key">a / ←</span> 后退一帧，按 <span class="key">d / →</span> 前进一帧。按 <span class="key">j</span> 切换上一个视频，按 <span class="key">k</span> 切换下一个视频。</p>
     <div id="verify-controls" hidden>
       <div class="verify-row">
-        <label class="field verify-field">视频目录 <input id="verify-path" type="text" placeholder="请输入包含三视角视频的绝对路径"></label>
+        <label class="field verify-field">审核任务<select id="verify-task" onchange="loadVerifyVideos()"></select></label>
         <button id="verify-load" class="primary-button" onclick="loadVerifyVideos()">加载视频</button>
       </div>
-      <p>将根据 <code>observation.images.cam_high/*.mp4</code> 查找 episode，并同时加载主视角、左腕和右腕视频。按 <span class="key">k</span> 查看下一个，按 <span class="key">j</span> 查看上一个；按 <span class="key">a / ←</span> 后退一帧，按 <span class="key">d / →</span> 前进一帧。</p>
+      <p>审核数据固定读取 <code id="verify-data-root"></code>。选择任务后，将根据 <code>observation.images.cam_high/*.mp4</code> 查找 episode，并同时加载主视角、左腕和右腕视频。按 <span class="key">k</span> 查看下一个，按 <span class="key">j</span> 查看上一个；按 <span class="key">a / ←</span> 后退一帧，按 <span class="key">d / →</span> 前进一帧。</p>
     </div>
     <section class="toolbar">
       <div id="label-controls" class="annotation-only">
@@ -368,9 +376,10 @@ PAGE = r'''<!doctype html>
     const TASKS = __TASKS__;
     const DEFAULT_TASK = __DEFAULT_TASK__;
     const APP_MODE = __APP_MODE__;
+    const VERIFY_DATA_ROOT = __VERIFY_DATA_ROOT__;
     const ALLOWED_KEYS = ['b', 's', 'e'];
     const VIDEO_FPS = 25;
-    let task = DEFAULT_TASK, metric = 'SIA+CSPC', episodes = [], marks = [], saved = {}, verifyRoot = '', requestVersion = 0, v = document.getElementById('v');
+    let task = DEFAULT_TASK, metric = 'SIA+CSPC', episodes = [], marks = [], saved = {}, requestVersion = 0, v = document.getElementById('v');
     const leftWristVideo = document.getElementById('left-wrist-video');
     const rightWristVideo = document.getElementById('right-wrist-video');
     const wristVideos = [leftWristVideo, rightWristVideo];
@@ -386,9 +395,10 @@ PAGE = r'''<!doctype html>
     allVideos.forEach(video => video.addEventListener('loadedmetadata', setPlaybackRate));
     let ep = document.getElementById('ep');
     if (APP_MODE === 'verify') {
-      document.title = '多视角视频核验';
-      document.querySelector('h1').textContent = '多视角视频核验';
+      document.title = '仿真数据审核';
+      document.querySelector('h1').textContent = '仿真数据审核';
       document.getElementById('verify-controls').hidden = false;
+      document.getElementById('verify-data-root').textContent = VERIFY_DATA_ROOT;
       document.querySelectorAll('.annotation-only').forEach(x => x.hidden = true);
       document.getElementById('ep').disabled = false;
     }
@@ -421,7 +431,8 @@ PAGE = r'''<!doctype html>
         else { marks=[]; clearVideos(); render(); document.getElementById('status').textContent='当前任务没有可标注视频'; }
       }).catch(error=>document.getElementById('status').textContent='加载失败：'+error.message);
     }
-    fetchData();
+    if (APP_MODE === 'verify') loadVerifyTasks();
+    else fetchData();
     /* legacy initialization disabled */
     /* fetch('/annotations').then(r=>r.json()).then(a=>{saved=a; return fetch('/episodes');}).then(r => r.json()).then(xs => {
       ep.innerHTML = xs.map(x => `<option value="${x}">${saved[x] ? '✓ ' : '○ '}${x.replace(/^.*press_by_number\//, '')}</option>`).join('');
@@ -461,8 +472,7 @@ PAGE = r'''<!doctype html>
       return episode.replace('/observation.images.cam_high/', `/observation.images.cam_${side}_wrist/`);
     }
     function videoUrl(episode) {
-      const rootQuery = APP_MODE === 'verify' ? '&root=' + encodeURIComponent(verifyRoot) : '';
-      return '/video?task='+encodeURIComponent(task)+'&metric='+encodeURIComponent(metric)+'&episode=' + encodeURIComponent(episode) + rootQuery;
+      return '/video?task='+encodeURIComponent(task)+'&metric='+encodeURIComponent(metric)+'&episode=' + encodeURIComponent(episode);
     }
     function clearVideos() {
       allVideos.forEach(video => {
@@ -516,14 +526,22 @@ PAGE = r'''<!doctype html>
       setPlaybackRate();
       v.focus();
     }
+    function loadVerifyTasks() {
+      fetch('/verify-tasks').then(r => r.json().then(data => {
+        if (!r.ok) throw new Error(data.error || '加载审核任务失败');
+        return data;
+      })).then(tasks => {
+        const selector = document.getElementById('verify-task');
+        selector.innerHTML = tasks.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+        if (tasks.length) loadVerifyVideos();
+        else document.getElementById('status').textContent = '审核数据目录下没有可用任务';
+      }).catch(error => document.getElementById('status').textContent = '加载失败：'+error.message);
+    }
     function loadVerifyVideos() {
-      const path = document.getElementById('verify-path').value.trim();
-      if (!path) {
-        document.getElementById('status').textContent = '请输入视频目录的绝对路径';
-        return;
-      }
-      verifyRoot = path;
-      fetch('/episodes?path='+encodeURIComponent(path)).then(r => r.json().then(data => {
+      const verifyTask = document.getElementById('verify-task').value;
+      if (!verifyTask) return;
+      task = verifyTask;
+      fetch('/episodes?task='+encodeURIComponent(verifyTask)).then(r => r.json().then(data => {
         if (!r.ok) throw new Error(data.error || '加载失败');
         return data;
       })).then(xs => {
@@ -704,13 +722,32 @@ def episodes(task=None, metric: str = DEFAULT_METRIC) -> list[str]:
     return [path for path in output.decode().splitlines()
             if allowed_video_path(path, config['video_root'], metric)]
 
-def verify_episodes(root: str) -> list[str]:
-    """Find all head-view videos below a user-supplied local directory."""
-    if not isinstance(root, str) or not root.startswith('/'):
-        raise ValueError('视频目录必须是绝对路径')
-    root = os.path.abspath(root)
-    if not os.path.isdir(root):
-        raise ValueError('视频目录不存在或不是目录')
+def verify_tasks() -> list[str]:
+    """List task directories available in the dedicated verification dataset."""
+    if not os.path.isdir(VERIFY_DATA_ROOT):
+        raise ValueError('审核数据目录不存在')
+    tasks = []
+    for entry in os.scandir(VERIFY_DATA_ROOT):
+        if not entry.is_dir() or entry.name.startswith('.'):
+            continue
+        if any(group.is_dir() and (group.name.startswith('ST-') or group.name.startswith('FRT-'))
+               for group in os.scandir(entry.path)):
+            tasks.append(entry.name)
+    return sorted(tasks)
+
+
+def verify_task_root(task: str) -> str:
+    if task not in verify_tasks():
+        raise ValueError('审核任务不存在')
+    root = os.path.abspath(os.path.join(VERIFY_DATA_ROOT, task))
+    if not path_within(root, VERIFY_DATA_ROOT):
+        raise ValueError('invalid verify task path')
+    return root
+
+
+def verify_episodes(task: str) -> list[str]:
+    """Find all head-view videos for one verification task."""
+    root = verify_task_root(task)
     return sorted(glob.glob(
         os.path.join(root, '**', 'observation.images.cam_high', '*.mp4'),
         recursive=True,
@@ -952,11 +989,15 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if parsed.path == '/':
                 body, content_type = PAGE.encode(), 'text/html; charset=utf-8'
+            elif parsed.path == '/verify-tasks':
+                if MODE != 'verify':
+                    self.send_error(404)
+                    return
+                body, content_type = json.dumps(verify_tasks()).encode(), 'application/json'
             elif parsed.path == '/episodes':
                 if MODE == 'verify':
-                    root = query.get('path', [''])[0]
                     try:
-                        body = json.dumps(verify_episodes(root)).encode()
+                        body = json.dumps(verify_episodes(request_task)).encode()
                         content_type = 'application/json'
                     except ValueError as exc:
                         self.send_json({'error': str(exc)}, 400)
@@ -972,11 +1013,9 @@ class Handler(BaseHTTPRequestHandler):
                 path = query.get('episode', [''])[0]
                 if MODE == 'verify':
                     normalized = os.path.abspath(path)
-                    verify_root_input = query.get('root', [''])[0]
-                    verify_root = os.path.abspath(verify_root_input)
+                    verify_root = verify_task_root(request_task)
                     if (not path.startswith('/') or normalized != path or
-                            not verify_root_input or not os.path.isdir(verify_root) or
-                            os.path.commonpath((normalized, verify_root)) != verify_root or
+                            not path_within(normalized, verify_root) or
                             not os.path.isfile(normalized) or
                             os.path.basename(os.path.dirname(normalized)) not in VIDEO_CAMERA_DIRECTORIES or
                             not normalized.endswith('.mp4')):
@@ -1150,9 +1189,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--mode', choices=('label', 'verify'), default='label',
-                        help='label 标注模式；verify 只读核验模式，需要在页面输入视频目录')
+                        help='label 标注模式；verify 从固定审核数据源读取的只读核验模式')
     parser.add_argument('--task', choices=sorted(TASKS), default='organize_table',
-                        help='任务名；Verified_Data 下的新任务默认只使用 s 键')
+                        help='任务名；Veified_Data 下的新任务默认只使用 s 键')
     args = parser.parse_args()
     CURRENT_TASK = args.task
     MODE = args.mode
@@ -1164,6 +1203,7 @@ def main() -> None:
     PAGE = PAGE.replace('__TASKS__', json.dumps(TASKS))
     PAGE = PAGE.replace('__DEFAULT_TASK__', json.dumps(CURRENT_TASK))
     PAGE = PAGE.replace('__APP_MODE__', json.dumps(MODE))
+    PAGE = PAGE.replace('__VERIFY_DATA_ROOT__', json.dumps(VERIFY_DATA_ROOT))
     PAGE = PAGE.replace(
         "const TASKS = __TASKS__;",
         f"const TASKS = {json.dumps(TASKS)}; const ALLOWED_KEYS = ['b','s','e'];",

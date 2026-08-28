@@ -1,6 +1,13 @@
 # 仿真数据标注
 
-一个用于机器人操作视频标注的本地 Web 工具。程序优先直接读取开发机上的视频目录，在浏览器中播放视频，并将标注结果自动保存为本地 JSON 文件。当配置的视频目录不在本机时，程序才会通过 SSH 回退到远程读取。
+一个用于机器人操作视频标注和只读审核的本地 Web 工具。数据标注与数据审核是两套彼此独立的工作模式和数据源。
+
+| 模式 | 数据源 | 是否写入标注 |
+| --- | --- | --- |
+| 数据标注 | `/mnt/public2/liushengbang/data/Veified_Data` | 是 |
+| 数据审核 | `/mnt/public2/liushengbang/data/RoboDojo_Dataset_to_VMB` | 否，只读播放 |
+
+标注模式只会读取 `Veified_Data` 下在 `tasks.yaml` 中配置的任务；审核模式只会读取 `RoboDojo_Dataset_to_VMB` 下的任务，两者不会互相回退或混用。
 
 ## 支持范围
 
@@ -99,13 +106,13 @@ which python
 python labeler.py --port 8765
 ```
 
-启动只读核验模式：
+启动只读审核模式：
 
 ```bash
 python labeler.py --mode verify --port 8765
 ```
 
-核验模式不提供任何标注、截图或导出功能。打开页面后输入视频目录的绝对路径，点击“加载视频”，程序会递归查找该目录下的 `observation.images.cam_high/*.mp4`，并同时显示对应的主视角、左腕和右腕视频。核验时可按 `k` 查看下一个 episode，按 `j` 查看上一个 episode，首尾循环切换；按 `a` 或左方向键后退一帧，按 `d` 或右方向键前进一帧。
+审核模式不提供任何标注、截图或导出功能。页面会直接列出 `/mnt/public2/liushengbang/data/RoboDojo_Dataset_to_VMB` 下包含 `ST-*` 或 `FRT-*` 数据的任务；选择任务后，程序递归查找该任务下的 `observation.images.cam_high/*.mp4`，并同时显示对应的主视角、左腕和右腕视频。审核时可按 `k` 查看下一个 episode，按 `j` 查看上一个 episode，首尾循环切换；按 `a` 或左方向键后退一帧，按 `d` 或右方向键前进一帧。
 
 启动成功后会输出：
 

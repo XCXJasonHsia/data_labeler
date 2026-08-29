@@ -148,12 +148,18 @@ deactivate
 
 页面会始终显示当前 metric 和数据分组。选择 `FPL+TRR` 时，还会从目录名中解析并显示错误类型数字编号和 episode 类别。例如路径中的 `FRT-4/FRT-4-2/FRT-4-2-b` 会显示错误类型 `4-2`、episode 类别 `b`；`FRT-4-EMB` 和 `FRT-4-ENV` 会分别显示 `EMB` 和 `ENV`。
 
+### Episode 有效性
+
+每个 episode 可标为“有效”或“无效”，也可清除判断。有效性在同一 task 的不同 metric 间共用；episode 下拉框用 `✅`、`⛔`、`⬜` 分别表示有效、无效和未判断，并可按状态筛选。状态保存在 `<task>_episode_validity.json`，不会自动删除视频或现有 metric 标注。
+
 ### SIA+CSPC
 
 - `s`：标注当前视频帧。
 - `c`：撤销当前视频最近一次标注。
 
-每次按 `s` 或 `c` 后，当前 episode 的结果都会立即写入本地 JSON，无需额外点击保存。
+每次按 `s` 或 `c` 后，当前 episode 的结果都会立即写入本地 JSON，无需额外点击保存。保存请求会按顺序执行，并绑定触发时的 task、metric、episode 和标注快照，因此快速连续标注或立即切换 episode 不会串写。页面会明确显示保存成功或失败；关闭仍有待处理保存的页面时，浏览器会提示确认。
+
+“清空本集”需要确认，确认后会立即保存空标注。“保存当前标注 / 截图”可手动确认当前标注已经落盘，并按需保存标注帧截图。
 
 ### FPL+TRR
 
@@ -192,6 +198,7 @@ VOC-MEM 标注必须从 `b` 开始、以 `e` 结束；`s` 必须位于对应的 
 <task>_sia_cspc_annotations.json
 <task>_voc-mem_annotations.json
 <task>_fpl_trr_annotations.json
+<task>_episode_validity.json
 ```
 
 升级前已有的 `<task>_sia_annotations.json` 会作为 `SIA+CSPC` 的历史标注兼容读取；下一次保存后会写入新的 `sia_cspc` 文件。

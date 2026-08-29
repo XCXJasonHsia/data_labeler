@@ -3,4 +3,5 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 *_annotations.json
+*_episode_validity.json
 *_screenshots/

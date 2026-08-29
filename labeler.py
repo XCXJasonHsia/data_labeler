@@ -42,6 +42,7 @@ VIDEO_RANGE_MAX_BYTES = 2 * 1024 * 1024
 VIDEO_WRITE_CHUNK_SIZE = 64 * 1024
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "tasks.yaml")
 ANNOTATION_LOCK = threading.Lock()
+VALIDITY_LOCK = threading.Lock()
 DEFAULT_METRIC = 'SIA+CSPC'
 METRIC_DEFINITIONS = {
     'SIA+CSPC': {
@@ -240,6 +241,8 @@ PAGE = r'''<!doctype html>
     #label-controls { display: contents; }
     .field { display: flex; min-width: 150px; flex-direction: column; gap: 5px; color: #475569; font-size: 12px; font-weight: 700; }
     .episode-field { min-width: 260px; flex: 1 1 360px; }
+    .validity-summary { width: 100%; color: var(--muted); font-size: 12px; }
+    .validity-button.active { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15); }
     .episode-context { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; margin: 0 0 16px; }
     .context-item { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: white; }
     .context-item span { display: block; margin-bottom: 2px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; }
@@ -338,17 +341,23 @@ PAGE = r'''<!doctype html>
         <label class="field">任务<select id="task" onchange="changeConfig()"></select></label>
         <label class="field">标注类型<select id="metric" onchange="changeConfig()"></select></label>
       </div>
+      <label class="field annotation-only">有效性筛选<select id="validity-filter" onchange="applyEpisodeFilter()"><option value="all">全部</option><option value="valid">仅有效</option><option value="invalid">仅无效</option><option value="unknown">仅未判断</option></select></label>
       <label class="field episode-field">Episode<select id="ep" onchange="loadVideo()"></select></label>
-      <button class="annotation-only primary-button" onclick="save()">保存并发送到远程</button>
+      <button id="mark-valid" class="annotation-only validity-button" onclick="setValidity('valid')">✓ 标为有效</button>
+      <button id="mark-invalid" class="annotation-only validity-button danger-button" onclick="setValidity('invalid')">✕ 标为无效</button>
+      <button id="clear-validity" class="annotation-only validity-button" onclick="setValidity(null)">清除判断</button>
+      <button class="annotation-only primary-button" onclick="save()">保存当前标注 / 截图</button>
       <button class="annotation-only danger-button" onclick="clearMarks()">清空本集</button>
       <button class="annotation-only" onclick="transfer()">Transfer all</button>
       <button class="annotation-only" onclick="syncDataset()">同步全部到 dataset_sim</button>
+      <div id="validity-summary" class="annotation-only validity-summary"></div>
     </section>
     <section id="episode-context" class="episode-context annotation-only">
       <div class="context-item"><span>当前指标</span><strong id="current-metric">—</strong></div>
       <div class="context-item"><span>数据分组</span><strong id="current-group">—</strong></div>
       <div class="context-item"><span>错误类型编号</span><strong id="current-error-type">—</strong></div>
       <div class="context-item"><span>Episode 类别</span><strong id="current-episode-kind">—</strong></div>
+      <div class="context-item"><span>数据有效性</span><strong id="current-validity">未判断</strong></div>
     </section>
     <div class="video-layout">
       <div class="video-panel">
@@ -387,7 +396,9 @@ PAGE = r'''<!doctype html>
     const VERIFY_DATA_ROOT = __VERIFY_DATA_ROOT__;
     const ALLOWED_KEYS = ['b', 's', 'e'];
     const VIDEO_FPS = 25;
-    let task = DEFAULT_TASK, metric = 'SIA+CSPC', episodes = [], marks = [], saved = {}, requestVersion = 0, wristPlaybackWanted = false, v = document.getElementById('v');
+    let task = DEFAULT_TASK, metric = 'SIA+CSPC', allEpisodes = [], episodes = [], marks = [], saved = {}, validity = {}, requestVersion = 0, wristPlaybackWanted = false, v = document.getElementById('v');
+    let saveQueue = Promise.resolve(), pendingSaves = 0, saveSequence = 0;
+    const latestSaveByEpisode = {};
     const leftWristVideo = document.getElementById('left-wrist-video');
     const rightWristVideo = document.getElementById('right-wrist-video');
     const wristVideos = [leftWristVideo, rightWristVideo];
@@ -412,8 +423,6 @@ PAGE = r'''<!doctype html>
     }
     const manualLoadButton = document.querySelector('button[onclick="loadVideo()"]');
     if (manualLoadButton) manualLoadButton.remove();
-    const legacySaveButton = document.querySelector('button[onclick^="save"]');
-    if (legacySaveButton) legacySaveButton.remove();
     const taskEl=document.getElementById('task'), metricEl=document.getElementById('metric');
     taskEl.innerHTML=Object.keys(TASKS).map(x=>`<option value="${x}">${x}</option>`).join('');
     taskEl.value=task;
@@ -431,12 +440,11 @@ PAGE = r'''<!doctype html>
       Promise.all([
         fetch('/annotations?task='+encodeURIComponent(requestedTask)+'&metric='+encodeURIComponent(requestedMetric)).then(r=>r.json()),
         fetch('/episodes?task='+encodeURIComponent(requestedTask)+'&metric='+encodeURIComponent(requestedMetric)).then(r=>r.json()),
-      ]).then(([a,xs])=>{
+        fetch('/validity?task='+encodeURIComponent(requestedTask)).then(r=>r.json()),
+      ]).then(([a,xs,statuses])=>{
         if (currentRequest !== requestVersion || task !== requestedTask || metric !== requestedMetric) return;
-        saved=a; episodes=xs;
-        ep.innerHTML=xs.map(x=>`<option value="${escapeHtml(x)}">${saved[x]?'✓':'○'} ${escapeHtml(episodeLabel(x))}</option>`).join('');
-        if (xs.length) loadVideo();
-        else { marks=[]; clearVideos(); render(); document.getElementById('status').textContent='当前任务没有可标注视频'; }
+        saved=a; allEpisodes=xs; validity=statuses;
+        applyEpisodeFilter();
       }).catch(error=>document.getElementById('status').textContent='加载失败：'+error.message);
     }
     if (APP_MODE === 'verify') loadVerifyTasks();
@@ -464,10 +472,49 @@ PAGE = r'''<!doctype html>
       if (domain) return {group, episodeName, errorType:domain[1], episodeKind:domain[2].toUpperCase()};
       return {group, episodeName, errorType:'—', episodeKind:'—'};
     }
+    function validityText(episode) {
+      return validity[episode] === 'valid' ? '有效' : validity[episode] === 'invalid' ? '无效' : '未判断';
+    }
+    function validitySymbol(episode) {
+      return validity[episode] === 'valid' ? '✅' : validity[episode] === 'invalid' ? '⛔' : '⬜';
+    }
     function episodeLabel(episode) {
       const info=episodeInfo(episode);
-      if (metric === 'FPL+TRR') return `${info.group} · 错误 ${info.errorType} · ${info.episodeKind} · ${info.episodeName}`;
-      return `${info.group} · ${info.episodeName}`;
+      const label=metric === 'FPL+TRR' ? `${info.group} · 错误 ${info.errorType} · ${info.episodeKind} · ${info.episodeName}` : `${info.group} · ${info.episodeName}`;
+      return `${validitySymbol(episode)} ${saved[episode] ? '✓' : '○'} ${label}`;
+    }
+    function updateValiditySummary() {
+      const counts={valid:0, invalid:0, unknown:0};
+      allEpisodes.forEach(episode => counts[validity[episode] || 'unknown']++);
+      document.getElementById('validity-summary').textContent=`有效 ${counts.valid} · 无效 ${counts.invalid} · 未判断 ${counts.unknown} · 当前显示 ${episodes.length}/${allEpisodes.length}`;
+    }
+    function applyEpisodeFilter(preferredEpisode='', reload=true) {
+      if (APP_MODE === 'verify') return;
+      const filter=document.getElementById('validity-filter').value;
+      const previous=preferredEpisode || ep.value;
+      episodes=allEpisodes.filter(episode => filter === 'all' || (filter === 'unknown' ? !validity[episode] : validity[episode] === filter));
+      ep.innerHTML=episodes.map(episode=>`<option value="${escapeHtml(episode)}">${escapeHtml(episodeLabel(episode))}</option>`).join('');
+      const keptCurrent=previous && episodes.includes(previous);
+      if (keptCurrent) ep.value=previous;
+      updateValiditySummary();
+      if (episodes.length && (reload || !keptCurrent)) loadVideo();
+      else if (episodes.length) updateEpisodeContext();
+      else {
+        marks=[]; clearVideos(); render(); updateEpisodeContext();
+        document.getElementById('status').textContent='当前筛选条件下没有 episode';
+      }
+    }
+    function setValidity(state) {
+      const episode=ep.value;
+      if (!episode) return;
+      fetch('/validity', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({task, episode, state})})
+        .then(r=>r.json().then(data=>{if(!r.ok) throw new Error(data.error || '保存有效性失败'); return data;}))
+        .then(data=>{
+          if (state) validity[episode]=state; else delete validity[episode];
+          applyEpisodeFilter(episode, false);
+          document.getElementById('status').textContent=data.message;
+        })
+        .catch(error=>document.getElementById('status').textContent='保存有效性失败：'+error.message);
     }
     function updateEpisodeContext() {
       const info=episodeInfo(ep.value);
@@ -475,6 +522,9 @@ PAGE = r'''<!doctype html>
       document.getElementById('current-group').textContent=info.group;
       document.getElementById('current-error-type').textContent=info.errorType;
       document.getElementById('current-episode-kind').textContent=info.episodeKind;
+      document.getElementById('current-validity').textContent=ep.value ? validityText(ep.value) : '—';
+      document.getElementById('mark-valid').classList.toggle('active', validity[ep.value] === 'valid');
+      document.getElementById('mark-invalid').classList.toggle('active', validity[ep.value] === 'invalid');
     }
     function wristEpisode(episode, side) {
       return episode.replace('/observation.images.cam_high/', `/observation.images.cam_${side}_wrist/`);
@@ -570,7 +620,7 @@ PAGE = r'''<!doctype html>
         if (!r.ok) throw new Error(data.error || '加载失败');
         return data;
       })).then(xs => {
-        episodes = xs; saved = {}; marks = [];
+        allEpisodes = xs; episodes = xs; saved = {}; validity = {}; marks = [];
         ep.innerHTML = xs.map(x => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('');
         if (xs.length) loadVideo();
         else { clearVideos(); render(); document.getElementById('status').textContent = '该路径下没有可核验的 episode'; }
@@ -596,8 +646,7 @@ PAGE = r'''<!doctype html>
       key = String(key).toLowerCase();
       marks.push({type: key, frame: frame(), time: Number(v.currentTime.toFixed(3))});
       render();
-      persistLocal();
-      document.getElementById('status').textContent = 'Marked ' + key.toUpperCase() + ' at frame ' + frame();
+      persistLocal('已自动保存').catch(()=>{});
     }
     function undoLastNodeMark() {
       if (TASKS[task].metrics[metric].kind !== 'nodes') return false;
@@ -607,8 +656,7 @@ PAGE = r'''<!doctype html>
       }
       const removed = marks.pop();
       render();
-      persistLocal();
-      document.getElementById('status').textContent = `已撤销 ${metric} 第 ${removed.frame} 帧的标注`;
+      persistLocal(`已撤销并保存 ${metric} 第 ${removed.frame} 帧`).catch(()=>{});
       return true;
     }
     document.addEventListener('keydown', e => {
@@ -652,43 +700,80 @@ PAGE = r'''<!doctype html>
       const info=episodeInfo(ep.value);
       const errorText=metric === 'FPL+TRR' ? `，错误 ${info.errorType}，类别 ${info.episodeKind}` : '';
       document.getElementById('status').textContent = `当前指标 ${metric}，${info.group} / ${info.episodeName}${errorText}：${marks.length} 个标注点`; }
-    function clearMarks() { marks = []; render(); }
-    function persistLocal() { fetch('/save', {method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({episode:ep.value, marks, duration:v.duration, task, metric})}).then(r => r.json()).then(x =>
-      { if(x.ok){saved[ep.value]={marks:marks.map(mark=>Object.assign({}, mark))}; ep.options[ep.selectedIndex].textContent='✓ '+ep.options[ep.selectedIndex].textContent.replace(/^[✓○] /,''); render();} document.getElementById('status').textContent = x.message || x.error; }); }
-    async function save() {
-      const saveImages = confirm('是否同时在本地保存各标注时间点的视频截图？');
-      if (saveImages) {
-        if (!v.videoWidth || !v.videoHeight) { alert('视频尚未加载完成，无法截图'); return; }
-        const canvas = document.createElement('canvas');
-        canvas.width = v.videoWidth; canvas.height = v.videoHeight;
-        const ctx = canvas.getContext('2d');
-        async function seekToFrame(time) {
-          v.pause();
-          if (Math.abs(v.currentTime - time) > 0.001) {
-            await new Promise(resolve => {
-              const onSeeked = () => { v.removeEventListener('seeked', onSeeked); resolve(); };
-              v.addEventListener('seeked', onSeeked);
-              v.currentTime = time;
-            });
-          }
-          // seeked means the timestamp was reached, but not necessarily that
-          // the decoded frame has already been painted to the video element.
-          if (v.requestVideoFrameCallback) {
-            await new Promise(resolve => v.requestVideoFrameCallback(() => resolve()));
-          } else {
-            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-          }
-        }
-        for (const mark of marks) {
-          await seekToFrame(mark.time);
-          ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-          const response = await fetch('/screenshot', {method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({episode: ep.value, frame: mark.frame, task, metric})});
-          if (!response.ok) throw new Error('截图保存失败：第 ' + mark.frame + ' 帧');
-        }
+    function saveSnapshot() {
+      return {episode:ep.value, task, metric, duration:v.duration,
+        marks:marks.map(mark=>Object.assign({}, mark))};
+    }
+    function snapshotKey(snapshot) {
+      return `${snapshot.task}\n${snapshot.metric}\n${snapshot.episode}`;
+    }
+    function refreshEpisodeOption(episode) {
+      for (const option of ep.options) {
+        if (option.value === episode) { option.textContent=episodeLabel(episode); break; }
       }
-      persistLocal();
+    }
+    function persistSnapshot(snapshot, successMessage='已保存') {
+      if (!snapshot.episode) return Promise.reject(new Error('当前没有可保存的 episode'));
+      const sequence=++saveSequence, key=snapshotKey(snapshot);
+      latestSaveByEpisode[key]=sequence;
+      pendingSaves++;
+      document.getElementById('status').textContent=`保存中…（${pendingSaves}）`;
+      const operation=saveQueue.then(async () => {
+        const response=await fetch('/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(snapshot)});
+        let result;
+        try { result=await response.json(); }
+        catch (_) { throw new Error(`服务器返回异常（HTTP ${response.status}）`); }
+        if (!response.ok || !result.ok) throw new Error(result.error || result.message || `HTTP ${response.status}`);
+        if (latestSaveByEpisode[key] === sequence && task === snapshot.task && metric === snapshot.metric) {
+          saved[snapshot.episode]={marks:snapshot.marks.map(mark=>Object.assign({}, mark))};
+          refreshEpisodeOption(snapshot.episode);
+        }
+        return result;
+      });
+      const reported=operation.then(result => {
+        pendingSaves--;
+        if (latestSaveByEpisode[key] === sequence && task === snapshot.task && metric === snapshot.metric && ep.value === snapshot.episode) {
+          document.getElementById('status').textContent=successMessage;
+        }
+        return result;
+      }).catch(error => {
+        pendingSaves--;
+        if (latestSaveByEpisode[key] === sequence && task === snapshot.task && metric === snapshot.metric && ep.value === snapshot.episode) {
+          document.getElementById('status').textContent='保存失败：'+error.message;
+        }
+        throw error;
+      });
+      saveQueue=reported.catch(()=>{});
+      return reported;
+    }
+    function persistLocal(successMessage='已保存') {
+      return persistSnapshot(saveSnapshot(), successMessage);
+    }
+    async function clearMarks() {
+      if (!ep.value || !confirm('确定清空当前 episode 的全部标注吗？清空后会立即保存。')) return;
+      marks=[]; render();
+      try { await persistLocal('已清空并保存当前 episode'); } catch (_) {}
+    }
+    window.addEventListener('beforeunload', event => {
+      if (!pendingSaves) return;
+      event.preventDefault();
+      event.returnValue='';
+    });
+    async function save() {
+      const snapshot=saveSnapshot();
+      try { await persistSnapshot(snapshot, '当前标注已保存'); }
+      catch (_) { return; }
+      if (!snapshot.marks.length || !confirm('标注已保存。是否同时保存各标注点的截图？')) return;
+      try {
+        for (const mark of snapshot.marks) {
+          const response=await fetch('/screenshot', {method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({episode:snapshot.episode, frame:mark.frame, task:snapshot.task, metric:snapshot.metric})});
+          if (!response.ok) throw new Error('第 ' + mark.frame + ' 帧截图失败');
+        }
+        document.getElementById('status').textContent=`当前标注及 ${snapshot.marks.length} 张截图已保存`;
+      } catch (error) {
+        document.getElementById('status').textContent='标注已保存，但'+error.message;
+      }
     }
     function transfer() {
       const directory = prompt('请输入远端存储目录的绝对路径：');
@@ -777,6 +862,39 @@ def verify_episodes(task: str) -> list[str]:
         os.path.join(root, '**', 'observation.images.cam_high', '*.mp4'),
         recursive=True,
     ))
+
+
+def validity_path(task: str) -> str:
+    if task not in TASKS:
+        raise ValueError('unknown task')
+    return os.path.join(os.path.dirname(__file__), f'{task}_episode_validity.json')
+
+
+def read_validity(task: str) -> dict[str, str]:
+    try:
+        with open(validity_path(task), encoding='utf-8') as source:
+            data = json.load(source)
+    except FileNotFoundError:
+        return {}
+    if not isinstance(data, dict) or any(value not in ('valid', 'invalid') for value in data.values()):
+        raise ValueError('invalid episode validity file')
+    return data
+
+
+def update_validity(task: str, episode: str, state: str | None) -> None:
+    path = validity_path(task)
+    with VALIDITY_LOCK:
+        data = read_validity(task)
+        if state is None:
+            data.pop(episode, None)
+        else:
+            data[episode] = state
+        temporary = path + '.tmp'
+        with open(temporary, 'w', encoding='utf-8') as output:
+            json.dump(data, output, ensure_ascii=False, indent=2)
+            output.write('\n')
+        os.replace(temporary, path)
+
 
 def annotation_path(task=CURRENT_TASK, metric=DEFAULT_METRIC):
     metric = canonical_metric(metric)
@@ -1042,6 +1160,11 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_error(403, 'verify mode is read-only')
                     return
                 all_data = read_local(request_task, request_metric); body, content_type = json.dumps(all_data).encode(), 'application/json'
+            elif parsed.path == '/validity':
+                if MODE == 'verify':
+                    self.send_error(403, 'verify mode is read-only')
+                    return
+                body, content_type = json.dumps(read_validity(request_task)).encode(), 'application/json'
             elif parsed.path == '/video':
                 path = query.get('episode', [''])[0]
                 if MODE == 'verify':
@@ -1105,6 +1228,28 @@ class Handler(BaseHTTPRequestHandler):
             if length:
                 self.rfile.read(length)
             self.send_json({'ok': False, 'error': 'verify 模式不支持标注或导出'}, 403)
+            return
+        if self.path == '/validity':
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                request = json.loads(self.rfile.read(length) or b'{}')
+                selected_task = request.get('task', CURRENT_TASK)
+                episode = request.get('episode', '')
+                state = request.get('state')
+                if selected_task not in TASKS:
+                    raise ValueError('unknown task')
+                if state not in ('valid', 'invalid', None):
+                    raise ValueError('invalid validity state')
+                root = TASKS[selected_task]['video_root']
+                if (not isinstance(episode, str) or not episode.startswith(root + '/') or
+                        '/observation.images.cam_high/' not in episode or not episode.endswith('.mp4') or
+                        not os.path.isfile(episode)):
+                    raise ValueError('invalid episode path')
+                update_validity(selected_task, episode, state)
+                labels = {'valid': '有效', 'invalid': '无效', None: '未判断'}
+                self.send_json({'ok': True, 'message': f'已标记为{labels[state]}'})
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                self.send_json({'ok': False, 'error': str(exc)}, 400)
             return
         if self.path == '/screenshot':
             try:
@@ -1216,7 +1361,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         except Exception as exc:
-            self.send_error(500, html.escape(str(exc)))
+            self.send_json({'ok': False, 'error': str(exc)}, 500)
 
 
 def main() -> None:

@@ -373,6 +373,12 @@ PAGE = r'''<!doctype html>
     </div>
   </main>
   <script>
+    window.addEventListener('error', function (event) {
+      var status = document.getElementById('status');
+      if (status) status.textContent = '页面脚本错误：' + (event.message || '未知错误') + '。请按 Ctrl+Shift+R 强制刷新。';
+    });
+  </script>
+  <script>
     const TASKS = __TASKS__;
     const DEFAULT_TASK = __DEFAULT_TASK__;
     const APP_MODE = __APP_MODE__;
@@ -441,15 +447,15 @@ PAGE = r'''<!doctype html>
     function savedMarksFor(episode) {
       const record=saved[episode];
       if (Array.isArray(record)) return record;
-      return Array.isArray(record?.marks) ? record.marks : [];
+      return record && Array.isArray(record.marks) ? record.marks : [];
     }
     function episodeInfo(episode) {
-      const normalized=String(episode || '').replaceAll('\\', '/');
-      const root=(TASKS[task]?.video_root || '').replace(/\/$/, '');
+      const normalized=String(episode || '').split('\\').join('/');
+      const root=((TASKS[task] && TASKS[task].video_root) || '').replace(/\/$/, '');
       const relative=root && normalized.startsWith(root + '/') ? normalized.slice(root.length + 1) : normalized;
       const parts=relative.split('/');
       const group=parts[0] || '—';
-      const episodeName=parts.includes('videos') ? parts[parts.indexOf('videos') - 1] : (parts.at(-1) || '—');
+      const episodeName=parts.includes('videos') ? parts[parts.indexOf('videos') - 1] : (parts[parts.length - 1] || '—');
       const regular=relative.match(/(?:^|\/)FRT-(\d+)\/FRT-\d+-(\d+)\/FRT-\d+-\d+-([abc])(?:\/|$)/i);
       const domain=relative.match(/(?:^|\/)FRT-(\d+)\/FRT-\d+-(EMB|ENV)(?:\/|$)/i);
       if (regular) return {group, episodeName, errorType:`${regular[1]}-${regular[2]}`, episodeKind:regular[3].toLowerCase()};
@@ -530,7 +536,7 @@ PAGE = r'''<!doctype html>
       });
     });
     function loadVideo() {
-      marks = savedMarksFor(ep.value).map(x=>({...x}));
+      marks = savedMarksFor(ep.value).map(x=>Object.assign({}, x));
       updateEpisodeContext();
       render();
       clearVideos();
@@ -647,7 +653,7 @@ PAGE = r'''<!doctype html>
     function clearMarks() { marks = []; render(); }
     function persistLocal() { fetch('/save', {method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({episode:ep.value, marks, duration:v.duration, task, metric})}).then(r => r.json()).then(x =>
-      { if(x.ok){saved[ep.value]={marks:marks.map(mark=>({...mark}))}; ep.options[ep.selectedIndex].textContent='✓ '+ep.options[ep.selectedIndex].textContent.replace(/^[✓○] /,''); render();} document.getElementById('status').textContent = x.message || x.error; }); }
+      { if(x.ok){saved[ep.value]={marks:marks.map(mark=>Object.assign({}, mark))}; ep.options[ep.selectedIndex].textContent='✓ '+ep.options[ep.selectedIndex].textContent.replace(/^[✓○] /,''); render();} document.getElementById('status').textContent = x.message || x.error; }); }
     async function save() {
       const saveImages = confirm('是否同时在本地保存各标注时间点的视频截图？');
       if (saveImages) {
@@ -1006,6 +1012,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if parsed.path == '/':
                 body, content_type = PAGE.encode(), 'text/html; charset=utf-8'
+            elif parsed.path == '/favicon.ico':
+                self.send_response(204)
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+                return
             elif parsed.path == '/verify-tasks':
                 if MODE != 'verify':
                     self.send_error(404)
@@ -1067,6 +1078,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_response(200)
             self.send_header('Content-Type', content_type)
+            if parsed.path == '/':
+                self.send_header('Cache-Control', 'no-store')
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -1224,10 +1237,6 @@ def main() -> None:
     PAGE = PAGE.replace(
         "const TASKS = __TASKS__;",
         f"const TASKS = {json.dumps(TASKS)}; const ALLOWED_KEYS = ['b','s','e'];",
-    )
-    PAGE = PAGE.replace(
-        '<span id="key-help"></span>',
-        ' '.join(f'<span class="key">{key}</span>' for key in config['markers']),
     )
     PAGE = PAGE.replace('press_by_number /', CURRENT_TASK + ' /')
     print(f'Open http://127.0.0.1:{args.port}')

@@ -38,6 +38,8 @@ REMOTE_ANNOT = (
 LOCAL_ANNOT = os.path.join(os.path.dirname(__file__), "organize_table_sia_cspc_annotations.json")
 LOCAL_SCREENSHOTS = os.path.join(os.path.dirname(__file__), "press_by_number_screenshots")
 FPS = 25
+VIDEO_RANGE_MAX_BYTES = 2 * 1024 * 1024
+VIDEO_WRITE_CHUNK_SIZE = 64 * 1024
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "tasks.yaml")
 ANNOTATION_LOCK = threading.Lock()
 DEFAULT_METRIC = 'SIA+CSPC'
@@ -622,7 +624,7 @@ PAGE = r'''<!doctype html>
       e.preventDefault();
       addMark(key);
       document.getElementById('status').textContent = '已标注 ' + key.toUpperCase() + '：第 ' + frame() + ' 帧（' + v.currentTime.toFixed(3) + ' 秒）';
-    });
+    }, true);
     v.addEventListener('timeupdate', updateTimeline);
     v.addEventListener('loadedmetadata', updateTimeline);
     document.getElementById('timeline').addEventListener('click', e => {
@@ -982,6 +984,9 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         start, end = requested_range or (0, file_size - 1)
+        range_header = self.headers.get('Range', '')
+        if requested_range and range_header.endswith('-'):
+            end = min(end, start + VIDEO_RANGE_MAX_BYTES - 1)
         content_length = end - start + 1
         self.send_response(206 if requested_range else 200)
         self.send_header('Content-Type', 'video/mp4')
@@ -995,7 +1000,7 @@ class Handler(BaseHTTPRequestHandler):
             source.seek(start)
             remaining = content_length
             while remaining:
-                chunk = source.read(min(1024 * 1024, remaining))
+                chunk = source.read(min(VIDEO_WRITE_CHUNK_SIZE, remaining))
                 if not chunk:
                     break
                 try:

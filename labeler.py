@@ -118,6 +118,10 @@ TASKS = {
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/sweep_block/exceptional_intervals.json',
                        'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
                                    'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+    'insert_tubes': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/insert_tubes',
+                       'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/insert_tubes/exceptional_intervals.json',
+                       'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
+                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
 }
 
 def canonical_metric(metric: str) -> str:
@@ -328,7 +332,7 @@ PAGE = r'''<!doctype html>
       <div class="sync-badge">三视角同步 · 25 FPS</div>
     </header>
     <p id="label-help" class="guide annotation-only">选择 episode 后，在主视角点击播放并使用
-      <span id="key-help"></span>。按键记录当前视频帧；点标注指标下按 <span class="key">c</span> 撤销最近一次标注。按 <span class="key">a / ←</span> 后退一帧，按 <span class="key">d / →</span> 前进一帧。按 <span class="key">j</span> 切换上一个视频，按 <span class="key">k</span> 切换下一个视频。</p>
+      <span id="key-help"></span>。按键记录当前视频帧；点标注指标下按 <span class="key">c</span> 或同时按 <span class="key">c+0</span> 撤销最近一次标注，同时按 <span class="key">c+1</span> 至 <span class="key">c+5</span> 撤销标注列表中对应序号的标注（仅 SIA+CSPC 和 FPL+TRR）。按 <span class="key">a / ←</span> 后退一帧，按 <span class="key">d / →</span> 前进一帧。按 <span class="key">j</span> 切换上一个视频，按 <span class="key">k</span> 切换下一个视频。</p>
     <div id="verify-controls" hidden>
       <div class="verify-row">
         <label class="field verify-field">审核任务<select id="verify-task" onchange="loadVerifyVideos()"></select></label>
@@ -379,7 +383,7 @@ PAGE = r'''<!doctype html>
     <div id="timeline" class="annotation-only" title="点击跳转"><div id="progress"></div></div>
     <div id="status"></div>
     <div class="table-card annotation-only">
-      <table><thead><tr><th>类型</th><th>帧号</th><th>时间</th></tr></thead>
+      <table><thead><tr><th>序号</th><th>类型</th><th>帧号</th><th>时间</th></tr></thead>
         <tbody id="rows"></tbody></table>
     </div>
   </main>
@@ -398,6 +402,8 @@ PAGE = r'''<!doctype html>
     const VIDEO_FPS = 25;
     let task = DEFAULT_TASK, metric = 'SIA+CSPC', allEpisodes = [], episodes = [], marks = [], saved = {}, validity = {}, requestVersion = 0, wristPlaybackWanted = false, v = document.getElementById('v');
     let saveQueue = Promise.resolve(), pendingSaves = 0, saveSequence = 0;
+    const pressedKeys = new Set(), handledUndoChords = new Set();
+    let cChordUsed = false;
     const latestSaveByEpisode = {};
     const leftWristVideo = document.getElementById('left-wrist-video');
     const rightWristVideo = document.getElementById('right-wrist-video');
@@ -648,31 +654,68 @@ PAGE = r'''<!doctype html>
       render();
       persistLocal('已自动保存').catch(()=>{});
     }
+    function undoNodeMarkAt(index) {
+      if (TASKS[task].metrics[metric].kind !== 'nodes') return false;
+      if (!marks.length) {
+        document.getElementById('status').textContent = `当前没有可撤销的 ${metric} 标注`;
+        return true;
+      }
+      if (index < 0 || index >= marks.length) {
+        document.getElementById('status').textContent = `当前没有可撤销的第 ${index + 1} 个 ${metric} 标注`;
+        return true;
+      }
+      const removed = marks.splice(index, 1)[0];
+      render();
+      persistLocal(`已撤销并保存 ${metric} 第 ${index + 1} 个标注（第 ${removed.frame} 帧）`).catch(()=>{});
+      return true;
+    }
     function undoLastNodeMark() {
       if (TASKS[task].metrics[metric].kind !== 'nodes') return false;
       if (!marks.length) {
         document.getElementById('status').textContent = `当前没有可撤销的 ${metric} 标注`;
         return true;
       }
-      const removed = marks.pop();
-      render();
-      persistLocal(`已撤销并保存 ${metric} 第 ${removed.frame} 帧`).catch(()=>{});
-      return true;
+      return undoNodeMarkAt(marks.length - 1);
     }
     document.addEventListener('keydown', e => {
       const key = (e.key || '').toLowerCase();
       const isFormInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName);
       if (e.ctrlKey || e.altKey || e.metaKey || isFormInput) return;
+      pressedKeys.add(key);
       if ((key === 'j' || key === 'k') && episodes.length) { e.preventDefault(); const n=ep.selectedIndex+(key==='j'?-1:1); ep.selectedIndex=(n+episodes.length)%episodes.length; loadVideo(); return; }
       if (key === 'a' || key === 'arrowleft') { e.preventDefault(); stepFrame(-1); return; }
       if (key === 'd' || key === 'arrowright') { e.preventDefault(); stepFrame(1); return; }
       if (APP_MODE === 'verify') return;
-      if (key === 'c' && undoLastNodeMark()) { e.preventDefault(); return; }
+      let chordDigit = null;
+      if (key === 'c') {
+        chordDigit = ['0', '1', '2', '3', '4', '5'].find(digit => pressedKeys.has(digit));
+      } else if (['0', '1', '2', '3', '4', '5'].includes(key) && pressedKeys.has('c')) {
+        chordDigit = key;
+      }
+      if (chordDigit && !handledUndoChords.has(chordDigit)) {
+        handledUndoChords.add(chordDigit);
+        cChordUsed = true;
+        const index = chordDigit === '0' ? marks.length - 1 : Number(chordDigit) - 1;
+        if (undoNodeMarkAt(index)) { e.preventDefault(); return; }
+      }
       if (!ALLOWED_KEYS.includes(key)) return;
       e.preventDefault();
       addMark(key);
       document.getElementById('status').textContent = '已标注 ' + key.toUpperCase() + '：第 ' + frame() + ' 帧（' + v.currentTime.toFixed(3) + ' 秒）';
     }, true);
+    document.addEventListener('keyup', e => {
+      const key = (e.key || '').toLowerCase();
+      const wasTracked = pressedKeys.has(key);
+      pressedKeys.delete(key);
+      if (key === 'c') {
+        if (wasTracked && APP_MODE !== 'verify' && !cChordUsed) undoLastNodeMark();
+        cChordUsed = false;
+        handledUndoChords.clear();
+      } else if (['0', '1', '2', '3', '4', '5'].includes(key)) {
+        handledUndoChords.delete(key);
+      }
+    }, true);
+    window.addEventListener('blur', () => { pressedKeys.clear(); handledUndoChords.clear(); cChordUsed = false; });
     v.addEventListener('timeupdate', updateTimeline);
     v.addEventListener('loadedmetadata', updateTimeline);
     document.getElementById('timeline').addEventListener('click', e => {
@@ -694,8 +737,8 @@ PAGE = r'''<!doctype html>
         document.getElementById('timeline').appendChild(el);
       });
     }
-    function render() { document.getElementById('rows').innerHTML = marks.map(m =>
-      `<tr><td>${m.type}</td><td>${m.frame}</td><td>${m.time}s</td></tr>`).join('');
+    function render() { document.getElementById('rows').innerHTML = marks.map((m, index) =>
+      `<tr><td>${index + 1}</td><td>${m.type}</td><td>${m.frame}</td><td>${m.time}s</td></tr>`).join('');
       updateTimeline();
       const info=episodeInfo(ep.value);
       const errorText=metric === 'FPL+TRR' ? `，错误 ${info.errorType}，类别 ${info.episodeKind}` : '';

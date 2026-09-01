@@ -22,6 +22,7 @@
 - `put_bottles_into_dustbin`
 - `stack_blocks`
 - `sweep_block`
+- `insert_tubes`
 
 `store_laptop_and_headphones` 对应实际目录名 `store_laptop_and_headphone`。
 

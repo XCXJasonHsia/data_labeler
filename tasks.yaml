@@ -115,3 +115,16 @@ sweep_block:
     FPL+TRR:
       markers: [s]
       kind: nodes
+insert_tubes:
+  video_root: /mnt/public2/liushengbang/data/Veified_Data/insert_tubes
+  annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/insert_tubes/exceptional_intervals.json
+  metrics:
+    SIA+CSPC:
+      markers: [s]
+      kind: nodes
+    VOC-MEM:
+      markers: [b, s, e]
+      kind: interval
+    FPL+TRR:
+      markers: [s]
+      kind: nodes

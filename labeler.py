@@ -17,6 +17,8 @@ import subprocess
 import os
 import threading
 import glob
+import fcntl
+from datetime import datetime, timezone
 try:
     import yaml
 except ImportError:
@@ -27,6 +29,8 @@ from urllib.parse import parse_qs, urlparse
 
 SSH = ["ssh", "-p", "41070", "root@183.233.148.6"]
 LABEL_DATA_ROOT = '/mnt/public2/liushengbang/data/Veified_Data'
+TRAINING_DATA_ROOT = '/mnt/public2/liushengbang/data/Training_Data'
+TRAINING_METRIC = 'training data'
 VERIFY_DATA_ROOT = '/mnt/public2/liushengbang/data/RoboDojo_Dataset_to_VMB'
 REMOTE_VIDEO = (
     "/mnt/public2/liushengbang/data/Veified_Data/press_by_number"
@@ -60,68 +64,80 @@ METRIC_DEFINITIONS = {
         'kind': 'nodes',
         'groups': ['FRT-*'],
     },
+    TRAINING_METRIC: {
+        'markers': [],
+        'kind': 'validity',
+        'groups': ['episode_*'],
+    },
 }
 LEGACY_METRICS = {'SIA': 'SIA+CSPC'}
 METRIC_FILE_SLUGS = {
     'SIA+CSPC': 'sia_cspc',
     'VOC-MEM': 'voc-mem',
     'FPL+TRR': 'fpl_trr',
+    TRAINING_METRIC: 'training_data',
 }
+VOC_MEM_TASKS = {'press_by_number', 'swap_blocks'}
 VIDEO_CAMERA_DIRECTORIES = (
     'observation.images.cam_high',
     'observation.images.cam_left_wrist',
     'observation.images.cam_right_wrist',
 )
-DATASET_SIM_ROOT = '/mnt/public2/liushengbang/vmbmk/dataset_sim'
-DATASET_TASK_ALIASES = {'sweep_block': 'sweep_blocks'}
-DATASET_GROUP_DOMAINS = {
-    'ST-1': 'id',
-    'ST-HQ-EMB': 'emb',
-    'ST-ENV': 'env',
-    'ST-HQ-ENV': 'env',
-}
-
 TASKS = {
     'organize_table': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/organize_table',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/organize_table/exceptional_intervals.json',
                        'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
-                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+                                   'FPL+TRR': {'markers': ['s'], 'kind': 'nodes'}}},
     'store_laptop_and_headphones': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/store_laptop_and_headphone',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/store_laptop_and_headphones/exceptional_intervals.json',
                        'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
-                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+                                   'FPL+TRR': {'markers': ['s'], 'kind': 'nodes'}}},
     'arrange_largest_number': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/arrange_largest_number',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/arrange_largest_number/exceptional_intervals.json',
                        'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
-                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+                                   'FPL+TRR': {'markers': ['s'], 'kind': 'nodes'}}},
     'fold_clothes': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/fold_clothes',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/fold_clothes/exceptional_intervals.json',
                        'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
-                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+                                   'FPL+TRR': {'markers': ['s'], 'kind': 'nodes'}}},
     'hang_mugs': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/hang_mugs',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/hang_mugs/exceptional_intervals.json',
                        'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
-                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+                                   'FPL+TRR': {'markers': ['s'], 'kind': 'nodes'}}},
     'make_toast': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/make_toast',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/make_toast/exceptional_intervals.json',
                        'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
-                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+                                   'FPL+TRR': {'markers': ['s'], 'kind': 'nodes'}}},
     'put_bottles_into_dustbin': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/put_bottles_into_dustbin',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/put_bottles_into_dustbin/exceptional_intervals.json',
                        'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
-                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+                                   'FPL+TRR': {'markers': ['s'], 'kind': 'nodes'}}},
     'stack_blocks': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/stack_blocks',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/stack_blocks/exceptional_intervals.json',
                        'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
-                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+                                   'FPL+TRR': {'markers': ['s'], 'kind': 'nodes'}}},
     'sweep_block': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/sweep_blocks',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/sweep_block/exceptional_intervals.json',
                        'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
-                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+                                   'FPL+TRR': {'markers': ['s'], 'kind': 'nodes'}}},
     'insert_tubes': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/insert_tubes',
                        'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/insert_tubes/exceptional_intervals.json',
                        'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
-                                   'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+                                   'FPL+TRR': {'markers': ['s'], 'kind': 'nodes'}}},
+    'pack_objects_into_box': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/pack_objects_into_box',
+                       'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/pack_objects_into_box/exceptional_intervals.json',
+                       'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
+                                   'FPL+TRR': {'markers': ['s'], 'kind': 'nodes'}}},
+    'fill_pen_holder': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/fill_pen_holder',
+                       'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/fill_pen_holder/exceptional_intervals.json',
+                       'metrics': {'SIA+CSPC': {'markers': ['s'], 'kind': 'nodes'},
+                                   'FPL+TRR': {'markers': ['s'], 'kind': 'nodes'}}},
+    'press_by_number': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/press_by_number',
+                       'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/press_by_number/exceptional_intervals.json',
+                       'metrics': {'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
+    'swap_blocks': {'video_root': '/mnt/public2/liushengbang/data/Veified_Data/swap_blocks',
+                       'annotation': '/mnt/public2/xiachenxiang/data/VOC-MEM/swap_blocks/exceptional_intervals.json',
+                       'metrics': {'VOC-MEM': {'markers': ['b', 's', 'e'], 'kind': 'interval'}}},
 }
 
 def canonical_metric(metric: str) -> str:
@@ -147,9 +163,19 @@ def load_tasks():
         configured_metrics = task_data.get('metrics', {})
         normalized_metrics = {}
         for metric, defaults in METRIC_DEFINITIONS.items():
+            if metric == TRAINING_METRIC and metric not in configured_metrics:
+                continue
+            if task in VOC_MEM_TASKS and metric not in ('VOC-MEM', TRAINING_METRIC):
+                continue
+            if metric == 'VOC-MEM' and task not in VOC_MEM_TASKS:
+                continue
             legacy_name = 'SIA' if metric == 'SIA+CSPC' else metric
             configured = configured_metrics.get(metric, configured_metrics.get(legacy_name, {}))
             normalized_metrics[metric] = {**defaults, **configured, 'groups': defaults['groups']}
+            if metric == TRAINING_METRIC:
+                if not path_within(configured.get('video_root', ''), TRAINING_DATA_ROOT):
+                    raise ValueError(f'{task} 的训练数据目录必须位于 {TRAINING_DATA_ROOT}')
+                normalized_metrics[metric].update(markers=[], kind='validity')
         task_data['metrics'] = normalized_metrics
 load_tasks()
 CURRENT_TASK = 'press_by_number'
@@ -251,7 +277,7 @@ PAGE = r'''<!doctype html>
     .context-item { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: white; }
     .context-item span { display: block; margin-bottom: 2px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; }
     .context-item strong { color: #1e3a8a; font-size: 15px; }
-    select, input {
+    select, input, textarea {
       width: 100%;
       min-height: 40px;
       padding: 8px 11px;
@@ -263,7 +289,10 @@ PAGE = r'''<!doctype html>
       font: inherit;
       transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
-    select:focus, input:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14); }
+    select:focus, input:focus, textarea:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14); }
+    #training-reason-panel { width: 100%; }
+    #invalid-reason { resize: vertical; min-height: 76px; }
+    #training-reason-panel small { color: var(--muted); font-weight: 400; }
     button {
       min-height: 40px;
       padding: 8px 14px;
@@ -331,8 +360,9 @@ PAGE = r'''<!doctype html>
       </div>
       <div class="sync-badge">三视角同步 · 25 FPS</div>
     </header>
-    <p id="label-help" class="guide annotation-only">选择 episode 后，在主视角点击播放并使用
+    <p id="label-help" class="guide annotation-only marker-only">选择 episode 后，在主视角点击播放并使用
       <span id="key-help"></span>。按键记录当前视频帧；点标注指标下按 <span class="key">c</span> 或同时按 <span class="key">c+0</span> 撤销最近一次标注，同时按 <span class="key">c+1</span> 至 <span class="key">c+5</span> 撤销标注列表中对应序号的标注（仅 SIA+CSPC 和 FPL+TRR）。按 <span class="key">a / ←</span> 后退一帧，按 <span class="key">d / →</span> 前进一帧。按 <span class="key">j</span> 切换上一个视频，按 <span class="key">k</span> 切换下一个视频。</p>
+    <p id="training-help" class="guide annotation-only" hidden><strong>training data</strong>：按 <span class="key">s</span> 标为有效，按 <span class="key">f</span> 标为无效。无效原因必填；输入框内不触发快捷键。按 <span class="key">j / k</span> 切换上一条 / 下一条，按 <span class="key">a / d</span> 逐帧查看。</p>
     <div id="verify-controls" hidden>
       <div class="verify-row">
         <label class="field verify-field">审核任务<select id="verify-task" onchange="loadVerifyVideos()"></select></label>
@@ -350,17 +380,21 @@ PAGE = r'''<!doctype html>
       <button id="mark-valid" class="annotation-only validity-button" onclick="setValidity('valid')">✓ 标为有效</button>
       <button id="mark-invalid" class="annotation-only validity-button danger-button" onclick="setValidity('invalid')">✕ 标为无效</button>
       <button id="clear-validity" class="annotation-only validity-button" onclick="setValidity(null)">清除判断</button>
-      <button class="annotation-only primary-button" onclick="save()">保存当前标注 / 截图</button>
-      <button class="annotation-only danger-button" onclick="clearMarks()">清空本集</button>
-      <button class="annotation-only" onclick="transfer()">Transfer all</button>
-      <button class="annotation-only" onclick="syncDataset()">同步全部到 dataset_sim</button>
+      <button class="annotation-only marker-only primary-button" onclick="save()">保存当前标注 / 截图</button>
+      <button class="annotation-only marker-only danger-button" onclick="clearMarks()">清空本集</button>
+      <button class="annotation-only marker-only danger-button" onclick="deleteEpisode()">删除当前数据</button>
+      <button class="annotation-only marker-only" onclick="transfer()">Transfer all</button>
+      <label id="training-reason-panel" class="field annotation-only" hidden>无效原因（标为无效时必填）
+        <textarea id="invalid-reason" rows="2" maxlength="4000" placeholder="手动填写该 episode 无效的原因" oninput="rememberReasonDraft()"></textarea>
+        <small>填写或修改后，点击“标为无效 / 保存原因”保存。</small>
+      </label>
       <div id="validity-summary" class="annotation-only validity-summary"></div>
     </section>
     <section id="episode-context" class="episode-context annotation-only">
       <div class="context-item"><span>当前指标</span><strong id="current-metric">—</strong></div>
       <div class="context-item"><span>数据分组</span><strong id="current-group">—</strong></div>
-      <div class="context-item"><span>错误类型编号</span><strong id="current-error-type">—</strong></div>
-      <div class="context-item"><span>Episode 类别</span><strong id="current-episode-kind">—</strong></div>
+      <div class="context-item marker-only"><span>错误类型编号</span><strong id="current-error-type">—</strong></div>
+      <div class="context-item marker-only"><span>Episode 类别</span><strong id="current-episode-kind">—</strong></div>
       <div class="context-item"><span>数据有效性</span><strong id="current-validity">未判断</strong></div>
     </section>
     <div class="video-layout">
@@ -380,9 +414,9 @@ PAGE = r'''<!doctype html>
       </div>
     </div>
     <label class="playback-toolbar">播放速度<select id="speed" onchange="setPlaybackRate()"><option value="0.25">0.25x</option><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option><option value="4">4x</option></select></label>
-    <div id="timeline" class="annotation-only" title="点击跳转"><div id="progress"></div></div>
+    <div id="timeline" class="annotation-only marker-only" title="点击跳转"><div id="progress"></div></div>
     <div id="status"></div>
-    <div class="table-card annotation-only">
+    <div class="table-card annotation-only marker-only">
       <table><thead><tr><th>序号</th><th>类型</th><th>帧号</th><th>时间</th></tr></thead>
         <tbody id="rows"></tbody></table>
     </div>
@@ -402,6 +436,8 @@ PAGE = r'''<!doctype html>
     const VIDEO_FPS = 25;
     let task = DEFAULT_TASK, metric = 'SIA+CSPC', allEpisodes = [], episodes = [], marks = [], saved = {}, validity = {}, requestVersion = 0, wristPlaybackWanted = false, v = document.getElementById('v');
     let saveQueue = Promise.resolve(), pendingSaves = 0, saveSequence = 0;
+    let dataLoading = false;
+    const reasonDrafts = new Map();
     const pressedKeys = new Set(), handledUndoChords = new Set();
     let cChordUsed = false;
     const latestSaveByEpisode = {};
@@ -433,6 +469,13 @@ PAGE = r'''<!doctype html>
     taskEl.innerHTML=Object.keys(TASKS).map(x=>`<option value="${x}">${x}</option>`).join('');
     taskEl.value=task;
     function changeConfig(){ task=taskEl.value; fetchData(); }
+    function isTrainingData() { return metric === 'training data'; }
+    function setDataLoading(loading) {
+      dataLoading = loading;
+      ep.disabled = loading;
+      document.querySelectorAll('.validity-button').forEach(button => button.disabled = loading);
+      document.getElementById('invalid-reason').disabled = loading;
+    }
     function fetchData(){
       if (APP_MODE === 'verify') return loadVerifyVideos();
       const previousMetric=metricEl.value;
@@ -441,17 +484,32 @@ PAGE = r'''<!doctype html>
       metricEl.value=metricNames.includes(previousMetric) ? previousMetric : metricNames[0];
       metric=metricEl.value;
       const metricConfig=TASKS[task].metrics[metric];
+      document.querySelectorAll('.marker-only').forEach(el => el.hidden = isTrainingData());
+      document.getElementById('training-help').hidden = !isTrainingData();
+      document.getElementById('training-reason-panel').hidden = !isTrainingData();
+      document.getElementById('mark-valid').textContent = isTrainingData() ? '✓ 标为有效 [S]' : '✓ 标为有效';
+      document.getElementById('mark-invalid').textContent = isTrainingData() ? '✕ 标为无效 / 保存原因 [F]' : '✕ 标为无效';
       document.getElementById('key-help').innerHTML=metricConfig.markers.map(key=>`<span class="key">${key}</span>`).join(' ');
+      setDataLoading(true);
+      clearVideos();
+      const readJSON = response => response.json().then(data => {
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        return data;
+      });
       const requestedTask=task, requestedMetric=metric, currentRequest=++requestVersion;
-      Promise.all([
-        fetch('/annotations?task='+encodeURIComponent(requestedTask)+'&metric='+encodeURIComponent(requestedMetric)).then(r=>r.json()),
-        fetch('/episodes?task='+encodeURIComponent(requestedTask)+'&metric='+encodeURIComponent(requestedMetric)).then(r=>r.json()),
-        fetch('/validity?task='+encodeURIComponent(requestedTask)).then(r=>r.json()),
-      ]).then(([a,xs,statuses])=>{
+      saveQueue.then(() => Promise.all([
+        fetch('/annotations?task='+encodeURIComponent(requestedTask)+'&metric='+encodeURIComponent(requestedMetric)).then(readJSON),
+        fetch('/episodes?task='+encodeURIComponent(requestedTask)+'&metric='+encodeURIComponent(requestedMetric)).then(readJSON),
+        fetch('/validity?task='+encodeURIComponent(requestedTask)+'&metric='+encodeURIComponent(requestedMetric)).then(readJSON),
+      ])).then(([a,xs,statuses])=>{
         if (currentRequest !== requestVersion || task !== requestedTask || metric !== requestedMetric) return;
         saved=a; allEpisodes=xs; validity=statuses;
+        setDataLoading(false);
         applyEpisodeFilter();
-      }).catch(error=>document.getElementById('status').textContent='加载失败：'+error.message);
+      }).catch(error=>{
+        if (currentRequest !== requestVersion) return;
+        document.getElementById('status').textContent='加载失败：'+error.message;
+      });
     }
     if (APP_MODE === 'verify') loadVerifyTasks();
     else fetchData();
@@ -467,10 +525,11 @@ PAGE = r'''<!doctype html>
     }
     function episodeInfo(episode) {
       const normalized=String(episode || '').split('\\').join('/');
-      const root=((TASKS[task] && TASKS[task].video_root) || '').replace(/\/$/, '');
+      const config=TASKS[task];
+      const root=((config && ((config.metrics[metric] || {}).video_root || config.video_root)) || '').replace(/\/$/, '');
       const relative=root && normalized.startsWith(root + '/') ? normalized.slice(root.length + 1) : normalized;
       const parts=relative.split('/');
-      const group=parts[0] || '—';
+      const group=isTrainingData() ? 'training data' : parts[0] || '—';
       const episodeName=parts.includes('videos') ? parts[parts.indexOf('videos') - 1] : (parts[parts.length - 1] || '—');
       const regular=relative.match(/(?:^|\/)FRT-(\d+)\/FRT-\d+-(\d+)\/FRT-\d+-\d+-([abc])(?:\/|$)/i);
       const domain=relative.match(/(?:^|\/)FRT-(\d+)\/FRT-\d+-(EMB|ENV)(?:\/|$)/i);
@@ -478,27 +537,32 @@ PAGE = r'''<!doctype html>
       if (domain) return {group, episodeName, errorType:domain[1], episodeKind:domain[2].toUpperCase()};
       return {group, episodeName, errorType:'—', episodeKind:'—'};
     }
+    function validityState(episode) {
+      const record=validity[episode];
+      return record && typeof record === 'object' ? record.state : record;
+    }
     function validityText(episode) {
-      return validity[episode] === 'valid' ? '有效' : validity[episode] === 'invalid' ? '无效' : '未判断';
+      return validityState(episode) === 'valid' ? '有效' : validityState(episode) === 'invalid' ? '无效' : '未判断';
     }
     function validitySymbol(episode) {
-      return validity[episode] === 'valid' ? '✅' : validity[episode] === 'invalid' ? '⛔' : '⬜';
+      return validityState(episode) === 'valid' ? '✅' : validityState(episode) === 'invalid' ? '⛔' : '⬜';
     }
     function episodeLabel(episode) {
       const info=episodeInfo(episode);
       const label=metric === 'FPL+TRR' ? `${info.group} · 错误 ${info.errorType} · ${info.episodeKind} · ${info.episodeName}` : `${info.group} · ${info.episodeName}`;
+      if (isTrainingData()) return `${validitySymbol(episode)} ${label}`;
       return `${validitySymbol(episode)} ${saved[episode] ? '✓' : '○'} ${label}`;
     }
     function updateValiditySummary() {
       const counts={valid:0, invalid:0, unknown:0};
-      allEpisodes.forEach(episode => counts[validity[episode] || 'unknown']++);
+      allEpisodes.forEach(episode => counts[validityState(episode) || 'unknown']++);
       document.getElementById('validity-summary').textContent=`有效 ${counts.valid} · 无效 ${counts.invalid} · 未判断 ${counts.unknown} · 当前显示 ${episodes.length}/${allEpisodes.length}`;
     }
     function applyEpisodeFilter(preferredEpisode='', reload=true) {
       if (APP_MODE === 'verify') return;
       const filter=document.getElementById('validity-filter').value;
       const previous=preferredEpisode || ep.value;
-      episodes=allEpisodes.filter(episode => filter === 'all' || (filter === 'unknown' ? !validity[episode] : validity[episode] === filter));
+      episodes=allEpisodes.filter(episode => filter === 'all' || (filter === 'unknown' ? !validityState(episode) : validityState(episode) === filter));
       ep.innerHTML=episodes.map(episode=>`<option value="${escapeHtml(episode)}">${escapeHtml(episodeLabel(episode))}</option>`).join('');
       const keptCurrent=previous && episodes.includes(previous);
       if (keptCurrent) ep.value=previous;
@@ -510,17 +574,45 @@ PAGE = r'''<!doctype html>
         document.getElementById('status').textContent='当前筛选条件下没有 episode';
       }
     }
+    function reasonDraftKey() { return `${task}\n${ep.value}`; }
+    function rememberReasonDraft() {
+      if (!isTrainingData() || !ep.value || dataLoading) return;
+      const value=document.getElementById('invalid-reason').value;
+      if (value === ((validity[ep.value] || {}).reason || '')) reasonDrafts.delete(reasonDraftKey());
+      else reasonDrafts.set(reasonDraftKey(), value);
+    }
     function setValidity(state) {
       const episode=ep.value;
-      if (!episode) return;
-      fetch('/validity', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({task, episode, state})})
-        .then(r=>r.json().then(data=>{if(!r.ok) throw new Error(data.error || '保存有效性失败'); return data;}))
-        .then(data=>{
-          if (state) validity[episode]=state; else delete validity[episode];
-          applyEpisodeFilter(episode, false);
-          document.getElementById('status').textContent=data.message;
-        })
-        .catch(error=>document.getElementById('status').textContent='保存有效性失败：'+error.message);
+      if (!episode || dataLoading || APP_MODE === 'verify') return;
+      const input=document.getElementById('invalid-reason');
+      const reason=isTrainingData() && state === 'invalid' ? input.value.trim() : '';
+      if (isTrainingData() && state === 'invalid' && !reason) {
+        document.getElementById('status').textContent='请填写无效原因，再点击“标为无效 / 保存原因”';
+        input.focus();
+        return;
+      }
+      const snapshot={task, metric, episode, state, reason};
+      const draftKey=reasonDraftKey(), draftValue=input.value;
+      pendingSaves++;
+      document.getElementById('status').textContent='正在保存 episode 有效性…';
+      const operation=saveQueue.then(async () => {
+        const response=await fetch('/validity', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(snapshot)});
+        const data=await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || '保存有效性失败');
+        if (reasonDrafts.get(draftKey) === draftValue) reasonDrafts.delete(draftKey);
+        if (task === snapshot.task && metric === snapshot.metric) {
+          if (snapshot.state) validity[snapshot.episode]=data.record;
+          else delete validity[snapshot.episode];
+          const stillCurrent=ep.value === snapshot.episode;
+          applyEpisodeFilter(ep.value, false);
+          if (stillCurrent) document.getElementById('status').textContent=data.message;
+        }
+      }).catch(error=>{
+        if (task === snapshot.task && metric === snapshot.metric) {
+          document.getElementById('status').textContent='保存有效性失败：'+error.message;
+        }
+      }).finally(()=>{pendingSaves--;});
+      saveQueue=operation;
     }
     function updateEpisodeContext() {
       const info=episodeInfo(ep.value);
@@ -529,8 +621,13 @@ PAGE = r'''<!doctype html>
       document.getElementById('current-error-type').textContent=info.errorType;
       document.getElementById('current-episode-kind').textContent=info.episodeKind;
       document.getElementById('current-validity').textContent=ep.value ? validityText(ep.value) : '—';
-      document.getElementById('mark-valid').classList.toggle('active', validity[ep.value] === 'valid');
-      document.getElementById('mark-invalid').classList.toggle('active', validity[ep.value] === 'invalid');
+      document.getElementById('mark-valid').classList.toggle('active', validityState(ep.value) === 'valid');
+      document.getElementById('mark-invalid').classList.toggle('active', validityState(ep.value) === 'invalid');
+      if (isTrainingData()) {
+        const input=document.getElementById('invalid-reason');
+        input.value=reasonDrafts.has(reasonDraftKey()) ? reasonDrafts.get(reasonDraftKey()) : (validity[ep.value] || {}).reason || '';
+        input.disabled=!ep.value || dataLoading;
+      }
     }
     function wristEpisode(episode, side) {
       return episode.replace('/observation.images.cam_high/', `/observation.images.cam_${side}_wrist/`);
@@ -594,6 +691,7 @@ PAGE = r'''<!doctype html>
       });
     });
     function loadVideo() {
+      if (dataLoading) return;
       marks = savedMarksFor(ep.value).map(x=>Object.assign({}, x));
       updateEpisodeContext();
       render();
@@ -648,8 +746,9 @@ PAGE = r'''<!doctype html>
       document.getElementById('status').textContent = `${direction < 0 ? '后退' : '前进'}一帧：第 ${targetFrame} 帧（${targetTime.toFixed(3)} 秒）`;
     }
     function addMark(key) {
-      if (APP_MODE === 'verify') return;
+      if (APP_MODE === 'verify' || isTrainingData() || dataLoading) return;
       key = String(key).toLowerCase();
+      if (!TASKS[task].metrics[metric].markers.includes(key)) return;
       marks.push({type: key, frame: frame(), time: Number(v.currentTime.toFixed(3))});
       render();
       persistLocal('已自动保存').catch(()=>{});
@@ -680,12 +779,19 @@ PAGE = r'''<!doctype html>
     document.addEventListener('keydown', e => {
       const key = (e.key || '').toLowerCase();
       const isFormInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName);
-      if (e.ctrlKey || e.altKey || e.metaKey || isFormInput) return;
+      if (e.ctrlKey || e.altKey || e.metaKey || e.isComposing || isFormInput || e.target.isContentEditable || dataLoading) return;
       pressedKeys.add(key);
       if ((key === 'j' || key === 'k') && episodes.length) { e.preventDefault(); const n=ep.selectedIndex+(key==='j'?-1:1); ep.selectedIndex=(n+episodes.length)%episodes.length; loadVideo(); return; }
       if (key === 'a' || key === 'arrowleft') { e.preventDefault(); stepFrame(-1); return; }
       if (key === 'd' || key === 'arrowright') { e.preventDefault(); stepFrame(1); return; }
       if (APP_MODE === 'verify') return;
+      if (isTrainingData()) {
+        if (key === 's' || key === 'f') {
+          e.preventDefault();
+          if (!e.repeat) setValidity(key === 's' ? 'valid' : 'invalid');
+        }
+        return;
+      }
       let chordDigit = null;
       if (key === 'c') {
         chordDigit = ['0', '1', '2', '3', '4', '5'].find(digit => pressedKeys.has(digit));
@@ -698,7 +804,7 @@ PAGE = r'''<!doctype html>
         const index = chordDigit === '0' ? marks.length - 1 : Number(chordDigit) - 1;
         if (undoNodeMarkAt(index)) { e.preventDefault(); return; }
       }
-      if (!ALLOWED_KEYS.includes(key)) return;
+      if (!TASKS[task].metrics[metric].markers.includes(key)) return;
       e.preventDefault();
       addMark(key);
       document.getElementById('status').textContent = '已标注 ' + key.toUpperCase() + '：第 ' + frame() + ' 帧（' + v.currentTime.toFixed(3) + ' 秒）';
@@ -741,6 +847,10 @@ PAGE = r'''<!doctype html>
       `<tr><td>${index + 1}</td><td>${m.type}</td><td>${m.frame}</td><td>${m.time}s</td></tr>`).join('');
       updateTimeline();
       const info=episodeInfo(ep.value);
+      if (isTrainingData()) {
+        document.getElementById('status').textContent=`training data · ${info.episodeName}：${validityText(ep.value)}`;
+        return;
+      }
       const errorText=metric === 'FPL+TRR' ? `，错误 ${info.errorType}，类别 ${info.episodeKind}` : '';
       document.getElementById('status').textContent = `当前指标 ${metric}，${info.group} / ${info.episodeName}${errorText}：${marks.length} 个标注点`; }
     function saveSnapshot() {
@@ -793,16 +903,47 @@ PAGE = r'''<!doctype html>
       return persistSnapshot(saveSnapshot(), successMessage);
     }
     async function clearMarks() {
+      if (isTrainingData()) return;
       if (!ep.value || !confirm('确定清空当前 episode 的全部标注吗？清空后会立即保存。')) return;
       marks=[]; render();
       try { await persistLocal('已清空并保存当前 episode'); } catch (_) {}
     }
+    async function deleteEpisode() {
+      if (isTrainingData()) return;
+      const episode = ep.value;
+      if (!episode) return;
+      const info = episodeInfo(episode);
+      const confirmed = confirm(`确定永久删除 ${info.group} / ${info.episodeName} 吗？\n\n将同时删除该 episode 的原始数据、三路视频以及所有相关标注和有效性记录。此操作不可撤销。`);
+      if (!confirmed) return;
+      const button = document.querySelector('button[onclick="deleteEpisode()"]');
+      if (button) button.disabled = true;
+      document.getElementById('status').textContent = '删除中…';
+      try {
+        const response = await fetch('/delete-episode', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({task, metric, episode}),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        allEpisodes = allEpisodes.filter(item => item !== episode);
+        delete saved[episode];
+        delete validity[episode];
+        marks = [];
+        applyEpisodeFilter();
+        document.getElementById('status').textContent = result.message || '当前 episode 已删除';
+      } catch (error) {
+        document.getElementById('status').textContent = '删除失败：' + error.message;
+      } finally {
+        if (button) button.disabled = false;
+      }
+    }
     window.addEventListener('beforeunload', event => {
-      if (!pendingSaves) return;
+      if (!pendingSaves && !reasonDrafts.size) return;
       event.preventDefault();
       event.returnValue='';
     });
     async function save() {
+      if (isTrainingData()) return;
       const snapshot=saveSnapshot();
       try { await persistSnapshot(snapshot, '当前标注已保存'); }
       catch (_) { return; }
@@ -819,14 +960,11 @@ PAGE = r'''<!doctype html>
       }
     }
     function transfer() {
+      if (isTrainingData()) return;
       const directory = prompt('请输入远端存储目录的绝对路径：');
       if (!directory || !directory.startsWith('/')) return;
       fetch('/transfer', {method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify({directory, task, metric})}).then(r=>r.json()).then(x=>
-        document.getElementById('status').textContent=x.message||x.error); }
-    function syncDataset() {
-      if (!confirm('将所有已完成的本地标注同步到 dataset_sim 中对应 episode 的 annotation.json，是否继续？')) return;
-      fetch('/sync-dataset', {method:'POST'}).then(r=>r.json()).then(x=>
         document.getElementById('status').textContent=x.message||x.error); }
   </script>
 </body>
@@ -842,8 +980,8 @@ def remote(command: str, data: bytes | None = None) -> bytes:
     return result.stdout
 
 
-def local_task_root(task: str) -> str | None:
-    root = TASKS[task]['video_root']
+def local_task_root(task: str, metric: str | None = None) -> str | None:
+    root = task_config(task, metric)['video_root'] if metric else TASKS[task]['video_root']
     return root if os.path.isdir(root) else None
 
 
@@ -851,15 +989,17 @@ def allowed_video_path(path: str, root: str, metric: str = DEFAULT_METRIC) -> bo
     relative = os.path.relpath(path, root)
     group = relative.split(os.sep, 1)[0]
     patterns = METRIC_DEFINITIONS[canonical_metric(metric)]['groups']
-    return (relative != '..' and not relative.startswith('..' + os.sep) and
+    return (path_within(path, root) and relative != '..' and not relative.startswith('..' + os.sep) and
             any(fnmatch.fnmatchcase(group, pattern) for pattern in patterns))
 
 
 def episodes(task=None, metric: str = DEFAULT_METRIC) -> list[str]:
     task = task or CURRENT_TASK
     metric = canonical_metric(metric)
+    if metric not in TASKS[task]['metrics']:
+        return []
     config = task_config(task, metric)
-    root = local_task_root(task)
+    root = local_task_root(task, metric)
     if root:
         paths = []
         for group in config['groups']:
@@ -868,6 +1008,8 @@ def episodes(task=None, metric: str = DEFAULT_METRIC) -> list[str]:
                 recursive=True,
             ))
         return sorted(paths)
+    if metric == TRAINING_METRIC:
+        return []
     quoted_root = shlex.quote(config['video_root'])
     output = remote(
         f"find {quoted_root} -type f -path '*/observation.images.cam_high/*.mp4' | sort"
@@ -907,29 +1049,52 @@ def verify_episodes(task: str) -> list[str]:
     ))
 
 
-def validity_path(task: str) -> str:
+def validity_path(task: str, metric: str | None = None) -> str:
     if task not in TASKS:
         raise ValueError('unknown task')
-    return os.path.join(os.path.dirname(__file__), f'{task}_episode_validity.json')
+    suffix = '_training_data' if metric == TRAINING_METRIC else ''
+    return os.path.join(os.path.dirname(__file__), f'{task}{suffix}_episode_validity.json')
 
 
-def read_validity(task: str) -> dict[str, str]:
+def read_validity(task: str, metric: str | None = None) -> dict:
     try:
-        with open(validity_path(task), encoding='utf-8') as source:
+        with open(validity_path(task, metric), encoding='utf-8') as source:
             data = json.load(source)
     except FileNotFoundError:
         return {}
-    if not isinstance(data, dict) or any(value not in ('valid', 'invalid') for value in data.values()):
+    if not isinstance(data, dict):
         raise ValueError('invalid episode validity file')
+    for value in data.values():
+        if metric == TRAINING_METRIC:
+            if (not isinstance(value, dict) or value.get('state') not in ('valid', 'invalid') or
+                    not isinstance(value.get('reason'), str) or
+                    (value['state'] == 'invalid' and not value['reason'].strip())):
+                raise ValueError('invalid training episode validity file')
+        elif value not in ('valid', 'invalid'):
+            raise ValueError('invalid episode validity file')
     return data
 
 
-def update_validity(task: str, episode: str, state: str | None) -> None:
-    path = validity_path(task)
-    with VALIDITY_LOCK:
-        data = read_validity(task)
+def update_validity(task: str, episode: str, state: str | None,
+                    metric: str | None = None, reason: str = ''):
+    if state not in ('valid', 'invalid', None):
+        raise ValueError('invalid validity state')
+    if metric == TRAINING_METRIC:
+        if not isinstance(reason, str) or len(reason) > 4000:
+            raise ValueError('无效原因必须是文字，最多 4000 字')
+        reason = reason.strip() if state == 'invalid' else ''
+        if state == 'invalid' and not reason:
+            raise ValueError('请填写无效原因')
+    path = validity_path(task, metric)
+    with VALIDITY_LOCK, open(path + '.lock', 'a') as lock_file:
+        # The 8765 and 8800 services share these files; lock across processes too.
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        data = read_validity(task, metric)
         if state is None:
             data.pop(episode, None)
+        elif metric == TRAINING_METRIC:
+            data[episode] = {'state': state, 'reason': reason,
+                             'updated_at': datetime.now(timezone.utc).isoformat()}
         else:
             data[episode] = state
         temporary = path + '.tmp'
@@ -937,6 +1102,106 @@ def update_validity(task: str, episode: str, state: str | None) -> None:
             json.dump(data, output, ensure_ascii=False, indent=2)
             output.write('\n')
         os.replace(temporary, path)
+        return data.get(episode)
+
+
+def episode_root_for_video(path: str, root: str) -> str:
+    """Return the episode directory for a validated head-view video path."""
+    normalized = os.path.realpath(path)
+    normalized_root = os.path.realpath(root)
+    if (not path.startswith(root.rstrip(os.sep) + os.sep) or
+            not path_within(normalized, normalized_root) or
+            not normalized.endswith('.mp4') or
+            os.path.basename(os.path.dirname(normalized)) != 'observation.images.cam_high'):
+        raise ValueError('invalid episode path')
+    relative = os.path.relpath(normalized, normalized_root)
+    parts = relative.split(os.sep)
+    try:
+        videos_index = parts.index('videos')
+    except ValueError:
+        raise ValueError('selected video path does not contain an episode')
+    if videos_index < 2 or not parts[videos_index - 1].startswith('episode_'):
+        raise ValueError('selected video path does not contain an episode')
+    episode_root = os.path.join(normalized_root, *parts[:videos_index])
+    if not path_within(episode_root, normalized_root) or not os.path.isdir(episode_root):
+        raise ValueError('episode directory does not exist')
+    return episode_root
+
+
+def annotation_record_matches_episode(value, episode_root: str) -> bool:
+    if not isinstance(value, str) or not value.startswith('/'):
+        return False
+    try:
+        return path_within(os.path.realpath(value), episode_root)
+    except (TypeError, ValueError):
+        return False
+
+
+def remove_episode_from_json(path: str, episode_root: str) -> bool:
+    """Remove records referring to one episode and atomically rewrite the file."""
+    try:
+        with open(path, encoding='utf-8') as source:
+            data = json.load(source)
+    except FileNotFoundError:
+        return False
+    if isinstance(data, list):
+        filtered = [record for record in data if not (
+            isinstance(record, dict) and annotation_record_matches_episode(record.get('episode'), episode_root))]
+    elif isinstance(data, dict):
+        filtered = {
+            key: value for key, value in data.items()
+            if not annotation_record_matches_episode(key, episode_root) and not (
+                isinstance(value, dict) and annotation_record_matches_episode(value.get('episode'), episode_root))
+        }
+    else:
+        raise ValueError(f'invalid annotation file: {path}')
+    if len(filtered) == len(data):
+        return False
+    temporary = path + '.tmp'
+    with open(temporary, 'w', encoding='utf-8') as output:
+        json.dump(filtered, output, ensure_ascii=False, indent=2)
+        output.write('\n')
+    os.replace(temporary, path)
+    return True
+
+
+def delete_episode_data(task: str, metric: str, episode: str) -> str:
+    """Delete one episode and every labeler/source record that points to it."""
+    selected_metric = canonical_metric(metric)
+    if selected_metric == TRAINING_METRIC:
+        raise ValueError('training data 仅标注 episode 有效性和无效原因')
+    if task not in TASKS or selected_metric not in TASKS[task]['metrics']:
+        raise ValueError('unknown task or metric')
+    video_root = task_config(task, selected_metric)['video_root']
+    if not allowed_video_path(episode, video_root, selected_metric):
+        raise ValueError('selected video is outside the groups allowed for this metric')
+    episode_root = episode_root_for_video(episode, video_root)
+    changed_files = []
+    # Keep metadata edits under the same lock as normal annotation saves.
+    with ANNOTATION_LOCK, VALIDITY_LOCK:
+        if not os.path.isdir(episode_root):
+            raise ValueError('episode directory does not exist')
+        if os.path.exists(os.path.join(video_root, 'exceptional_intervals.json')):
+            candidate_paths = [os.path.join(video_root, 'exceptional_intervals.json')]
+        else:
+            candidate_paths = []
+        configured_annotation = TASKS[task].get('annotation')
+        if configured_annotation and configured_annotation not in candidate_paths:
+            candidate_paths.append(configured_annotation)
+        labeler_root = os.path.dirname(__file__)
+        candidate_paths.extend(glob.glob(os.path.join(labeler_root, '*_annotations.json')))
+        candidate_paths.append(validity_path(task))
+        seen = set()
+        for path in candidate_paths:
+            if path in seen or not os.path.isfile(path):
+                continue
+            seen.add(path)
+            if remove_episode_from_json(path, episode_root):
+                changed_files.append(path)
+        # The episode directory contains the parquet, metadata, and all camera videos.
+        import shutil
+        shutil.rmtree(episode_root)
+    return f'已删除 {os.path.basename(episode_root)}（清理 {len(changed_files)} 个标注文件）'
 
 
 def annotation_path(task=CURRENT_TASK, metric=DEFAULT_METRIC):
@@ -946,6 +1211,8 @@ def annotation_path(task=CURRENT_TASK, metric=DEFAULT_METRIC):
 
 def read_local(task=CURRENT_TASK, metric=DEFAULT_METRIC):
     metric = canonical_metric(metric)
+    if metric == TRAINING_METRIC:
+        return {}
     paths = [annotation_path(task, metric)]
     if metric == 'SIA+CSPC':
         paths.append(os.path.join(os.path.dirname(__file__), f'{task}_sia_annotations.json'))
@@ -976,6 +1243,8 @@ def update_local_annotation(record):
 def make_frames(record):
     marks = record.get('marks', [])
     config = task_config(record.get('task', CURRENT_TASK), record.get('metric', DEFAULT_METRIC))
+    if config['kind'] == 'validity':
+        raise ValueError('training data 不使用标注点')
     if any(m.get('type') not in config['markers'] for m in marks):
         raise ValueError(f"invalid marker type in {record.get('episode')}")
     if config['kind'] == 'nodes':
@@ -998,115 +1267,6 @@ def make_frames(record):
     total = max(max(e for _, e in intervals) + 1, round(float(record.get('duration', 0)) * FPS))
     return sorted(special | {i for i in range(0, total, 20)
                              if not any(b <= i <= e for b, e in intervals)})
-
-
-def dataset_task_directory(task: str) -> str:
-    candidates = [
-        DATASET_TASK_ALIASES.get(task, task),
-        os.path.basename(task_config(task)['video_root'].rstrip('/')),
-    ]
-    for name in dict.fromkeys(candidates):
-        path = os.path.join(DATASET_SIM_ROOT, name)
-        if os.path.isdir(path):
-            return path
-    raise ValueError(f'dataset_sim 中不存在 task: {task}')
-
-
-def dataset_episode_map(task: str) -> dict[str, str]:
-    """Map source videos to converted dataset episodes by group order."""
-    task_directory = dataset_task_directory(task)
-    target_groups: dict[str, list[tuple[int, str]]] = {
-        group: [] for group in DATASET_GROUP_DOMAINS
-    }
-    for metadata_file in glob.glob(os.path.join(task_directory, 'episodes', '*', 'metadata.json')):
-        with open(metadata_file, encoding='utf-8') as source:
-            metadata = json.load(source)
-        if metadata.get('success') is not True:
-            continue
-        episode_id = metadata.get('episode_id', '')
-        try:
-            episode_number = int(episode_id.rsplit('_', 1)[1])
-        except (IndexError, ValueError):
-            continue
-        for group, domain in DATASET_GROUP_DOMAINS.items():
-            if metadata.get('domain') == domain:
-                target_groups[group].append((episode_number, os.path.dirname(metadata_file)))
-
-    video_root = task_config(task)['video_root']
-    mapping = {}
-    for group in DATASET_GROUP_DOMAINS:
-        source_videos = sorted(glob.glob(
-            os.path.join(video_root, group, '**', 'observation.images.cam_high', '*.mp4'),
-            recursive=True,
-        ))
-        target_episodes = [path for _, path in sorted(target_groups[group])]
-        for source_video, target_episode in zip(source_videos, target_episodes):
-            target_video = os.path.join(target_episode, 'videos', 'front.mp4')
-            if (os.path.isfile(source_video) and os.path.isfile(target_video) and
-                    os.path.getsize(source_video) != os.path.getsize(target_video)):
-                continue
-            mapping[source_video] = os.path.join(target_episode, 'annotation.json')
-    return mapping
-
-
-def dataset_annotation_value(record: dict) -> tuple[str, list[dict]]:
-    metric = canonical_metric(record.get('metric', DEFAULT_METRIC))
-    if metric == 'SIA+CSPC':
-        frames = sorted({int(mark['frame']) for mark in record.get('marks', [])})
-        return 'subtask_segments', [
-            {'id': f'{index:03d}', 'subtask_frame': frame}
-            for index, frame in enumerate(frames, 1)
-        ]
-    if metric == 'VOC-MEM':
-        return 'voc_mem', [{'frame_index': frame} for frame in make_frames(record)]
-    raise ValueError(f'不支持的 metric: {metric}')
-
-
-def sync_dataset_annotations(dry_run: bool = False) -> tuple[int, list[str]]:
-    """Merge every local label record into its dataset_sim annotation file."""
-    updates: dict[str, dict[str, list[dict]]] = {}
-    skipped = []
-    for task in TASKS:
-        task_records = [
-            record
-            for metric in TASKS[task]['metrics']
-            for record in read_local(task, metric).values()
-        ]
-        if not task_records:
-            continue
-        try:
-            episode_map = dataset_episode_map(task)
-        except (OSError, ValueError) as exc:
-            skipped.extend(f'{task}/{record.get("episode_name", "unknown")}: {exc}'
-                           for record in task_records)
-            continue
-        for record in task_records:
-            try:
-                annotation_file = episode_map.get(record.get('episode', ''))
-                if not annotation_file or not os.path.isfile(annotation_file):
-                    raise ValueError('dataset_sim 中没有匹配的视频')
-                field, value = dataset_annotation_value(record)
-                updates.setdefault(annotation_file, {})[field] = value
-            except (KeyError, TypeError, ValueError) as exc:
-                skipped.append(f'{task}/{record.get("episode_name", "unknown")}: {exc}')
-
-    payloads = {}
-    for annotation_file, fields in updates.items():
-        with open(annotation_file, encoding='utf-8') as source:
-            annotation = json.load(source)
-        annotation.update(fields)
-        payloads[annotation_file] = annotation
-
-    if dry_run:
-        return len(payloads), skipped
-
-    for annotation_file, annotation in payloads.items():
-        temporary = annotation_file + '.tmp'
-        with open(temporary, 'w', encoding='utf-8') as output:
-            json.dump(annotation, output, ensure_ascii=False, indent=2)
-            output.write('\n')
-        os.replace(temporary, annotation_file)
-    return len(updates), skipped
 
 
 def parse_byte_range(value: str | None, file_size: int) -> tuple[int, int] | None:
@@ -1207,7 +1367,7 @@ class Handler(BaseHTTPRequestHandler):
                 if MODE == 'verify':
                     self.send_error(403, 'verify mode is read-only')
                     return
-                body, content_type = json.dumps(read_validity(request_task)).encode(), 'application/json'
+                body, content_type = json.dumps(read_validity(request_task, request_metric)).encode(), 'application/json'
             elif parsed.path == '/video':
                 path = query.get('episode', [''])[0]
                 if MODE == 'verify':
@@ -1226,7 +1386,7 @@ class Handler(BaseHTTPRequestHandler):
                         os.path.basename(os.path.dirname(path)) in VIDEO_CAMERA_DIRECTORIES and
                         path.endswith('.mp4')):
                     raise ValueError('invalid video path')
-                if local_task_root(request_task):
+                if local_task_root(request_task, request_metric):
                     if not os.path.isfile(path):
                         raise ValueError('video file does not exist')
                     self.serve_video(path)
@@ -1272,26 +1432,46 @@ class Handler(BaseHTTPRequestHandler):
                 self.rfile.read(length)
             self.send_json({'ok': False, 'error': 'verify 模式不支持标注或导出'}, 403)
             return
+        if self.path == '/delete-episode':
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                request = json.loads(self.rfile.read(length) or b'{}')
+                selected_task = request.get('task', CURRENT_TASK)
+                selected_metric = canonical_metric(request.get('metric', DEFAULT_METRIC))
+                episode = request.get('episode', '')
+                message = delete_episode_data(selected_task, selected_metric, episode)
+                self.send_json({'ok': True, 'message': message})
+            except (json.JSONDecodeError, TypeError, ValueError, OSError) as exc:
+                self.send_json({'ok': False, 'error': str(exc)}, 400)
+            return
         if self.path == '/validity':
             try:
                 length = int(self.headers.get('Content-Length', 0))
                 request = json.loads(self.rfile.read(length) or b'{}')
                 selected_task = request.get('task', CURRENT_TASK)
+                selected_metric = request.get('metric')
+                if selected_metric is not None:
+                    selected_metric = canonical_metric(selected_metric)
                 episode = request.get('episode', '')
                 state = request.get('state')
                 if selected_task not in TASKS:
                     raise ValueError('unknown task')
                 if state not in ('valid', 'invalid', None):
                     raise ValueError('invalid validity state')
-                root = TASKS[selected_task]['video_root']
+                if selected_metric is not None and selected_metric not in TASKS[selected_task]['metrics']:
+                    raise ValueError('unknown metric')
+                root = (task_config(selected_task, selected_metric) if selected_metric else TASKS[selected_task])['video_root']
                 if (not isinstance(episode, str) or not episode.startswith(root + '/') or
-                        '/observation.images.cam_high/' not in episode or not episode.endswith('.mp4') or
+                        not path_within(episode, root) or
+                        os.path.basename(os.path.dirname(episode)) != 'observation.images.cam_high' or
+                        not episode.endswith('.mp4') or
+                        (selected_metric is not None and not allowed_video_path(episode, root, selected_metric)) or
                         not os.path.isfile(episode)):
                     raise ValueError('invalid episode path')
-                update_validity(selected_task, episode, state)
+                record = update_validity(selected_task, episode, state, selected_metric, request.get('reason', ''))
                 labels = {'valid': '有效', 'invalid': '无效', None: '未判断'}
-                self.send_json({'ok': True, 'message': f'已标记为{labels[state]}'})
-            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                self.send_json({'ok': True, 'message': f'已标记为{labels[state]}', 'record': record})
+            except (json.JSONDecodeError, TypeError, ValueError, OSError) as exc:
                 self.send_json({'ok': False, 'error': str(exc)}, 400)
             return
         if self.path == '/screenshot':
@@ -1304,6 +1484,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('invalid frame')
                 selected_task = obj.get('task', CURRENT_TASK)
                 selected_metric = canonical_metric(obj.get('metric', DEFAULT_METRIC))
+                if selected_metric == TRAINING_METRIC:
+                    raise ValueError('training data 不使用标注点或截图')
                 root = task_config(selected_task, selected_metric)['video_root']
                 if not (episode.startswith(root + '/') and allowed_video_path(episode, root, selected_metric) and episode.endswith('.mp4') and
                         '/observation.images.cam_high/' in episode):
@@ -1315,7 +1497,7 @@ class Handler(BaseHTTPRequestHandler):
                 command = (f"ffmpeg -hide_banner -loglevel error -ss {timestamp:.6f} "
                            f"-i {shlex.quote(episode)} -frames:v 1 -f image2pipe "
                            "-vcodec mjpeg -")
-                if local_task_root(selected_task) and os.path.isfile(episode):
+                if local_task_root(selected_task, selected_metric) and os.path.isfile(episode):
                     result = subprocess.run(
                         ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-ss', f'{timestamp:.6f}',
                          '-i', episode, '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'mjpeg', '-'],
@@ -1334,27 +1516,12 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self.send_json({'ok': False, 'error': str(exc)}, 400)
             return
-        if self.path == '/sync-dataset':
-            try:
-                with ANNOTATION_LOCK:
-                    updated, skipped = sync_dataset_annotations()
-                message = f'已同步 {updated} 个 episode 到 {DATASET_SIM_ROOT}'
-                if skipped:
-                    message += f'；跳过 {len(skipped)} 条未匹配或不完整记录'
-                    message += '：' + '；'.join(skipped[:3])
-                self.send_json({
-                    'ok': True,
-                    'message': message,
-                    'updated': updated,
-                    'skipped': skipped,
-                })
-            except Exception as exc:
-                self.send_json({'ok': False, 'error': str(exc)}, 400)
-            return
         if self.path == '/transfer':
             try:
                 length = int(self.headers.get('Content-Length', 0))
                 request = json.loads(self.rfile.read(length) or b'{}')
+                if canonical_metric(request.get('metric', DEFAULT_METRIC)) == TRAINING_METRIC:
+                    raise ValueError('training data 仅保存 episode 有效性和无效原因')
                 directory = request.get('directory', '')
                 if not isinstance(directory, str) or not directory.startswith('/'):
                     raise ValueError('远端存储目录必须是绝对路径')
@@ -1385,6 +1552,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 selected_task = obj.get('task', CURRENT_TASK)
                 selected_metric = canonical_metric(obj.get('metric', DEFAULT_METRIC))
+                if selected_metric == TRAINING_METRIC:
+                    raise ValueError('training data 仅保存 episode 有效性和无效原因')
                 video_root = task_config(selected_task, selected_metric)['video_root']
                 if not allowed_video_path(obj.get('episode', ''), video_root, selected_metric):
                     raise ValueError('selected video is outside the groups allowed for this metric')
@@ -1393,7 +1562,7 @@ class Handler(BaseHTTPRequestHandler):
                 episode_name = os.path.basename(obj['episode'].split('/videos/')[0].rstrip('/'))
                 obj.update(task=selected_task, metric=selected_metric, group=parts[idx + 1],
                            episode_name=episode_name, gap=20)
-            except (ValueError, IndexError):
+            except IndexError:
                 raise ValueError('selected video path does not contain task/group/episode')
             update_local_annotation(obj)
             self.send_json({'ok': True, 'message': 'Saved locally'})
@@ -1403,6 +1572,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
             self.wfile.write(body)
+        except (ValueError, TypeError, KeyError) as exc:
+            self.send_json({'ok': False, 'error': str(exc)}, 400)
         except Exception as exc:
             self.send_json({'ok': False, 'error': str(exc)}, 500)
 
@@ -1418,10 +1589,12 @@ def main() -> None:
     args = parser.parse_args()
     CURRENT_TASK = args.task
     MODE = args.mode
-    config = task_config(CURRENT_TASK)
+    metrics = TASKS[CURRENT_TASK]['metrics']
+    default_metric = DEFAULT_METRIC if DEFAULT_METRIC in metrics else next(iter(metrics))
+    config = task_config(CURRENT_TASK, default_metric)
     REMOTE_VIDEO = config['video_root']
     REMOTE_ANNOT = config['annotation']
-    LOCAL_ANNOT = annotation_path(CURRENT_TASK, DEFAULT_METRIC)
+    LOCAL_ANNOT = annotation_path(CURRENT_TASK, default_metric)
     LOCAL_SCREENSHOTS = os.path.join(os.path.dirname(__file__), f'{CURRENT_TASK}_screenshots')
     PAGE = PAGE.replace('__TASKS__', json.dumps(TASKS))
     PAGE = PAGE.replace('__DEFAULT_TASK__', json.dumps(CURRENT_TASK))

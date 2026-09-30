@@ -5,9 +5,10 @@
 | 模式 | 数据源 | 是否写入标注 |
 | --- | --- | --- |
 | 数据标注 | `/mnt/public2/liushengbang/data/Veified_Data` | 是 |
+| training data（标注类型） | `/mnt/public2/liushengbang/data/Training_Data` | 是，仅 episode 有效性与无效原因 |
 | 数据审核 | `/mnt/public2/liushengbang/data/RoboDojo_Dataset_to_VMB` | 否，只读播放 |
 
-标注模式只会读取 `Veified_Data` 下在 `tasks.yaml` 中配置的任务；审核模式只会读取 `RoboDojo_Dataset_to_VMB` 下的任务，两者不会互相回退或混用。
+标注模式根据 `tasks.yaml` 中所选标注类型读取对应目录：原有指标使用 `Veified_Data`，`training data` 使用 `Training_Data`。审核模式只读取 `RoboDojo_Dataset_to_VMB`。
 
 ## 支持范围
 
@@ -23,16 +24,24 @@
 - `stack_blocks`
 - `sweep_block`
 - `insert_tubes`
+- `pack_objects_into_box`
+- `fill_pen_holder`
+- `press_by_number`
+- `swap_blocks`
+- `play_stacking_toy`
 
 `store_laptop_and_headphones` 对应实际目录名 `store_laptop_and_headphone`。
 
-每个任务均支持三种 metric，各指标读取的数据范围不同：
+`pack_objects_into_box` 当前没有 `FRT-*` 数据，因此选择 `FPL+TRR` 时没有可标注的 episode。`fill_pen_holder` 使用 `Veified_Data/fill_pen_holder` 下的 ST 与 FRT 数据。
+
+任务支持的 metric 按任务配置决定。`press_by_number` 和 `swap_blocks` 仅支持 `VOC-MEM`；其他任务不提供该指标。各指标读取的数据范围如下：
 
 | Metric | 读取的数据 |
 | --- | --- |
-| `VOC-MEM` | `ST-1`、`ST-HQ-EMB`、`ST-HQ-ENV` |
+| `VOC-MEM`（仅 `press_by_number`、`swap_blocks`） | `ST-1`、`ST-HQ-EMB`、`ST-HQ-ENV` |
 | `SIA+CSPC` | `ST-1`、`ST-HQ-EMB`、`ST-HQ-ENV`、`ST-2` |
 | `FPL+TRR` | 所有顶层 `FRT-*` 数据，包括常规 `a/b/c`、`EMB` 和 `ENV` |
+| `training data` | `Training_Data/<task>/episode_*`，15 个任务各 100 条 |
 
 程序根据各 episode 下的 `observation.images.cam_high/*.mp4` 主视角视频生成列表，并同时加载同一 episode 的以下三个视角：
 
@@ -151,7 +160,42 @@ deactivate
 
 ### Episode 有效性
 
-每个 episode 可标为“有效”或“无效”，也可清除判断。有效性在同一 task 的不同 metric 间共用；episode 下拉框用 `✅`、`⛔`、`⬜` 分别表示有效、无效和未判断，并可按状态筛选。状态保存在 `<task>_episode_validity.json`，不会自动删除视频或现有 metric 标注。
+每个 episode 可标为“有效”或“无效”，也可清除判断。原有评测指标的有效性在同一 task 的不同 metric 间共用；episode 下拉框用 `✅`、`⛔`、`⬜` 分别表示有效、无效和未判断，并可按状态筛选。评测数据状态保存在 `<task>_episode_validity.json`，不会自动删除视频或现有 metric 标注。训练数据使用下节所述的独立文件。
+
+### training data
+
+选择任务，再将“标注类型”切换为 `training data`。每个任务有 100 条官方训练轨迹，共 1500 条，提供主视角、左腕、右腕同步播放。
+
+- 观看完整 episode 后，点击“标为有效”或“标为无效 / 保存原因”。
+- 标为无效时必须手动填写原因；修改原因后再次点击“标为无效 / 保存原因”保存。
+- 支持清除判断，以及有效、无效、未判断筛选。切换 episode 后再返回，会恢复已保存的判断和原因。
+- `s` 标为有效，`f` 标为无效；原因为空时按 `f` 会提示填写并聚焦输入框。填写后点击保存，或离开输入框再按 `f`。输入框内的按键不会触发快捷键，长按不会重复保存。
+- 本类型不显示特殊点标注、截图、特殊点导出或删除数据按钮。`j/k` 切换 episode，`a/d` 或左右方向键逐帧查看。
+- 原因尚未保存时，切换 episode 会暂存输入；关闭或刷新页面会提示未保存。保存请求顺序执行并绑定原 task/episode。
+
+训练数据判断独立保存在仓库根目录的 `<task>_training_data_episode_validity.json`，不会写入原有评测标注。文件以主视角视频完整路径为键，值为：
+
+```json
+{"state": "invalid", "reason": "抓取失败，物体滑落", "updated_at": "2026-09-30T14:00:00+00:00"}
+```
+
+`state` 为 `valid` 或 `invalid`；有效时原因为空字符串，清除判断会移除对应记录。
+
+训练数据由官方 `RoboDojo-Benchmark/RoboDojo` 的 LeRobot v3.0 数据按 episode 导出，视频通过 stream copy 无损切分，没有重编码；每条同时保留全部 parquet 状态/动作列及官方 episode/frame/task 索引。导出布局为：
+
+```text
+Training_Data/<task>/episode_XXXXXX/
+  data/episode.parquet
+  videos/observation.images.cam_high/episode.mp4
+  videos/observation.images.cam_left_wrist/episode.mp4
+  videos/observation.images.cam_right_wrist/episode.mp4
+  meta/source_episode.json
+  meta/export.json
+```
+
+这是逐 episode 导出布局，不是重新编号后的 LeRobot v3 数据集。任务级 `meta/source_*` 保存官方元数据；`meta/export_info.json` 描述导出路径，根目录 `manifest.json` 记录总量和源数据差异。官方源数据有 9 条 episode 的某一路视频比状态数据少 1 帧，导出按官方相机时间边界保留并记录，未自动判为无效。`sweep_block` 这个已有平台任务名对应训练目录 `sweep_blocks`。
+
+导出脚本为 `scripts/export_training_data.py`，只在导出时需要 `pyarrow`、`ffmpeg` 和 `ffprobe`；平台运行依赖不变。脚本可重复运行，核对已有数据后续传，不覆盖人工标注。
 
 ### SIA+CSPC
 
@@ -161,6 +205,10 @@ deactivate
 每次按 `s` 或 `c` 后，当前 episode 的结果都会立即写入本地 JSON，无需额外点击保存。保存请求会按顺序执行，并绑定触发时的 task、metric、episode 和标注快照，因此快速连续标注或立即切换 episode 不会串写。页面会明确显示保存成功或失败；关闭仍有待处理保存的页面时，浏览器会提示确认。
 
 “清空本集”需要确认，确认后会立即保存空标注。“保存当前标注 / 截图”可手动确认当前标注已经落盘，并按需保存标注帧截图。
+
+### 删除当前数据
+
+“删除当前数据”需要二次确认。确认后会永久删除当前 `episode_...` 目录下的 parquet、meta 和三路视频，并同步从任务目录的 `exceptional_intervals.json`、labeler 的各 metric 标注文件及 episode 有效性文件中移除该 episode 的记录。该操作不可撤销；审核模式不会提供此按钮或接口。
 
 ### FPL+TRR
 
@@ -197,7 +245,7 @@ VOC-MEM 标注必须从 `b` 开始、以 `e` 结束；`s` 必须位于对应的 
 
 ```text
 <task>_sia_cspc_annotations.json
-<task>_voc-mem_annotations.json
+<task>_voc-mem_annotations.json  # 仅 press_by_number、swap_blocks
 <task>_fpl_trr_annotations.json
 <task>_episode_validity.json
 ```
@@ -208,7 +256,8 @@ VOC-MEM 标注必须从 `b` 开始、以 `e` 结束；`s` 必须位于对应的 
 
 ```text
 hang_mugs_sia_annotations.json
-hang_mugs_voc-mem_annotations.json
+press_by_number_voc-mem_annotations.json
+swap_blocks_voc-mem_annotations.json
 ```
 
 文件是一个以完整视频路径为 key 的 JSON 对象。每条记录主要包含：
@@ -225,16 +274,6 @@ hang_mugs_voc-mem_annotations.json
 
 ## 导出结果
 
-点击页面上的“同步全部到 dataset_sim”并确认后，程序会扫描所有 task 和 metric 的本地已保存结果，并合并写入：
-
-```text
-/mnt/public2/liushengbang/vmbmk/dataset_sim/<task>/episodes/<episode>/annotation.json
-```
-
-SIA+CSPC 结果写入 `subtask_segments`，VOC-MEM 结果写入 `voc_mem`。同步只替换对应 metric 的字段，保留 `annotation.json` 中已有的其他标注字段。程序按照原始视频分组和 `dataset_sim` 的 `success/domain` 元数据匹配对应视频；FPL+TRR 或其他找不到匹配视频、标注格式不完整的记录会被跳过，并在页面显示数量。
-
-目标文件名是 VMBMK 数据集现有格式使用的 `annotation.json`（单数）。
-
 点击页面上的 `Transfer all`，输入目标目录的绝对路径。程序会转换当前 task/metric 的全部本地记录，并写入：
 
 ```text
@@ -248,19 +287,13 @@ SIA+CSPC 结果写入 `subtask_segments`，VOC-MEM 结果写入 `voc_mem`。同�
 任务的视频目录、预留 annotation 路径以及 metric 配置位于 [tasks.yaml](tasks.yaml)。主要字段如下：
 
 ```yaml
-hang_mugs:
-  video_root: /mnt/public2/liushengbang/data/Veified_Data/hang_mugs
-  annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/hang_mugs/exceptional_intervals.json
+press_by_number:
+  video_root: /mnt/public2/liushengbang/data/Veified_Data/press_by_number
+  annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/press_by_number/exceptional_intervals.json
   metrics:
-    SIA+CSPC:
-      markers: [s]
-      kind: nodes
     VOC-MEM:
       markers: [b, s, e]
       kind: interval
-    FPL+TRR:
-      markers: [s]
-      kind: nodes
 ```
 
 当前 `annotation` 字段不会被 `Transfer all` 自动采用；实际导出位置仍以页面中手动输入的目标目录为准。
@@ -283,7 +316,7 @@ python labeler.py --port 8766
 
 ### 任务没有视频
 
-检查 `tasks.yaml` 中的 `video_root` 是否存在，并确认当前 metric 对应的数据目录存在：VOC-MEM 使用三类 ST，SIA+CSPC 额外使用 `ST-2`，FPL+TRR 使用 `FRT-*`。
+检查 `tasks.yaml` 中的 `video_root` 是否存在，并确认当前 metric 对应的数据目录存在：`press_by_number` 和 `swap_blocks` 的 VOC-MEM 使用三类 ST，SIA+CSPC 额外使用 `ST-2`，FPL+TRR 使用 `FRT-*`。
 
 ### 出现 SSH 主机指纹提示
 

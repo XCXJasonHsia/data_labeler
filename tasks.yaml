@@ -5,12 +5,13 @@ organize_table:
     SIA+CSPC:
       markers: [s]
       kind: nodes
-    VOC-MEM:
-      markers: [b, s, e]
-      kind: interval
     FPL+TRR:
       markers: [s]
       kind: nodes
+    training data:
+      video_root: /mnt/public2/liushengbang/data/Training_Data/organize_table
+      markers: []
+      kind: validity
 store_laptop_and_headphones:
   video_root: /mnt/public2/liushengbang/data/Veified_Data/store_laptop_and_headphone
   annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/store_laptop_and_headphones/exceptional_intervals.json
@@ -18,12 +19,13 @@ store_laptop_and_headphones:
     SIA+CSPC:
       markers: [s]
       kind: nodes
-    VOC-MEM:
-      markers: [b, s, e]
-      kind: interval
     FPL+TRR:
       markers: [s]
       kind: nodes
+    training data:
+      video_root: /mnt/public2/liushengbang/data/Training_Data/store_laptop_and_headphones
+      markers: []
+      kind: validity
 arrange_largest_number:
   video_root: /mnt/public2/liushengbang/data/Veified_Data/arrange_largest_number
   annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/arrange_largest_number/exceptional_intervals.json
@@ -31,12 +33,13 @@ arrange_largest_number:
     SIA+CSPC:
       markers: [s]
       kind: nodes
-    VOC-MEM:
-      markers: [b, s, e]
-      kind: interval
     FPL+TRR:
       markers: [s]
       kind: nodes
+    training data:
+      video_root: /mnt/public2/liushengbang/data/Training_Data/arrange_largest_number
+      markers: []
+      kind: validity
 fold_clothes:
   video_root: /mnt/public2/liushengbang/data/Veified_Data/fold_clothes
   annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/fold_clothes/exceptional_intervals.json
@@ -44,12 +47,13 @@ fold_clothes:
     SIA+CSPC:
       markers: [s]
       kind: nodes
-    VOC-MEM:
-      markers: [b, s, e]
-      kind: interval
     FPL+TRR:
       markers: [s]
       kind: nodes
+    training data:
+      video_root: /mnt/public2/liushengbang/data/Training_Data/fold_clothes
+      markers: []
+      kind: validity
 hang_mugs:
   video_root: /mnt/public2/liushengbang/data/Veified_Data/hang_mugs
   annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/hang_mugs/exceptional_intervals.json
@@ -57,12 +61,13 @@ hang_mugs:
     SIA+CSPC:
       markers: [s]
       kind: nodes
-    VOC-MEM:
-      markers: [b, s, e]
-      kind: interval
     FPL+TRR:
       markers: [s]
       kind: nodes
+    training data:
+      video_root: /mnt/public2/liushengbang/data/Training_Data/hang_mugs
+      markers: []
+      kind: validity
 make_toast:
   video_root: /mnt/public2/liushengbang/data/Veified_Data/make_toast
   annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/make_toast/exceptional_intervals.json
@@ -70,12 +75,13 @@ make_toast:
     SIA+CSPC:
       markers: [s]
       kind: nodes
-    VOC-MEM:
-      markers: [b, s, e]
-      kind: interval
     FPL+TRR:
       markers: [s]
       kind: nodes
+    training data:
+      video_root: /mnt/public2/liushengbang/data/Training_Data/make_toast
+      markers: []
+      kind: validity
 put_bottles_into_dustbin:
   video_root: /mnt/public2/liushengbang/data/Veified_Data/put_bottles_into_dustbin
   annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/put_bottles_into_dustbin/exceptional_intervals.json
@@ -83,12 +89,13 @@ put_bottles_into_dustbin:
     SIA+CSPC:
       markers: [s]
       kind: nodes
-    VOC-MEM:
-      markers: [b, s, e]
-      kind: interval
     FPL+TRR:
       markers: [s]
       kind: nodes
+    training data:
+      video_root: /mnt/public2/liushengbang/data/Training_Data/put_bottles_into_dustbin
+      markers: []
+      kind: validity
 stack_blocks:
   video_root: /mnt/public2/liushengbang/data/Veified_Data/stack_blocks
   annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/stack_blocks/exceptional_intervals.json
@@ -96,12 +103,13 @@ stack_blocks:
     SIA+CSPC:
       markers: [s]
       kind: nodes
-    VOC-MEM:
-      markers: [b, s, e]
-      kind: interval
     FPL+TRR:
       markers: [s]
       kind: nodes
+    training data:
+      video_root: /mnt/public2/liushengbang/data/Training_Data/stack_blocks
+      markers: []
+      kind: validity
 sweep_block:
   video_root: /mnt/public2/liushengbang/data/Veified_Data/sweep_blocks
   annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/sweep_block/exceptional_intervals.json
@@ -109,12 +117,13 @@ sweep_block:
     SIA+CSPC:
       markers: [s]
       kind: nodes
-    VOC-MEM:
-      markers: [b, s, e]
-      kind: interval
     FPL+TRR:
       markers: [s]
       kind: nodes
+    training data:
+      video_root: /mnt/public2/liushengbang/data/Training_Data/sweep_blocks
+      markers: []
+      kind: validity
 insert_tubes:
   video_root: /mnt/public2/liushengbang/data/Veified_Data/insert_tubes
   annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/insert_tubes/exceptional_intervals.json
@@ -122,9 +131,74 @@ insert_tubes:
     SIA+CSPC:
       markers: [s]
       kind: nodes
-    VOC-MEM:
-      markers: [b, s, e]
-      kind: interval
     FPL+TRR:
       markers: [s]
       kind: nodes
+    training data:
+      video_root: /mnt/public2/liushengbang/data/Training_Data/insert_tubes
+      markers: []
+      kind: validity
+pack_objects_into_box:
+  video_root: /mnt/public2/liushengbang/data/Veified_Data/pack_objects_into_box
+  annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/pack_objects_into_box/exceptional_intervals.json
+  metrics:
+    SIA+CSPC:
+      markers: [s]
+      kind: nodes
+    FPL+TRR:
+      markers: [s]
+      kind: nodes
+    training data:
+      video_root: /mnt/public2/liushengbang/data/Training_Data/pack_objects_into_box
+      markers: []
+      kind: validity
+fill_pen_holder:
+  video_root: /mnt/public2/liushengbang/data/Veified_Data/fill_pen_holder
+  annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/fill_pen_holder/exceptional_intervals.json
+  metrics:
+    SIA+CSPC:
+      markers: [s]
+      kind: nodes
+    FPL+TRR:
+      markers: [s]
+      kind: nodes
+    training data:
+      video_root: /mnt/public2/liushengbang/data/Training_Data/fill_pen_holder
+      markers: []
+      kind: validity
+press_by_number:
+  video_root: /mnt/public2/liushengbang/data/Veified_Data/press_by_number
+  annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/press_by_number/exceptional_intervals.json
+  metrics:
+    VOC-MEM:
+      markers: [b, s, e]
+      kind: interval
+    training data:
+      video_root: /mnt/public2/liushengbang/data/Training_Data/press_by_number
+      markers: []
+      kind: validity
+swap_blocks:
+  video_root: /mnt/public2/liushengbang/data/Veified_Data/swap_blocks
+  annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/swap_blocks/exceptional_intervals.json
+  metrics:
+    VOC-MEM:
+      markers: [b, s, e]
+      kind: interval
+    training data:
+      video_root: /mnt/public2/liushengbang/data/Training_Data/swap_blocks
+      markers: []
+      kind: validity
+play_stacking_toy:
+  video_root: /mnt/public2/liushengbang/data/Veified_Data/play_stacking_toy
+  annotation: /mnt/public2/xiachenxiang/data/VOC-MEM/play_stacking_toy/exceptional_intervals.json
+  metrics:
+    SIA+CSPC:
+      markers: [s]
+      kind: nodes
+    FPL+TRR:
+      markers: [s]
+      kind: nodes
+    training data:
+      video_root: /mnt/public2/liushengbang/data/Training_Data/play_stacking_toy
+      markers: []
+      kind: validity
